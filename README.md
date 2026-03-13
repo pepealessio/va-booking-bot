@@ -350,6 +350,10 @@ Useful files:
 - `src/va_bot/`: recurring booking bot
 - `tests/`: regression tests
 
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
+
 ## Notes
 
 - filter labels like club names are translated into the site’s hidden internal values automatically
