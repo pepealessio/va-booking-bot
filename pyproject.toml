@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "va-book-bot"
+version = "0.1.0"
+description = "CLI tooling for Virgin Active Italy class discovery and booking workflows."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.25,<0.26",
+  "keyring>=25.0,<26.0",
+  "python-dotenv>=1.0,<2.0",
+  "PyYAML>=6.0,<7.0",
+]
+
+[project.scripts]
+va = "va_cli.cli:main"
+va-bot = "va_bot.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
