@@ -196,6 +196,22 @@ class BotRuntimeTests(unittest.TestCase):
         service._book_occurrence(self.rule, occurrence)
         self.assertEqual(client.book_calls, ["355132c220", "355132c220"])
 
+    def test_book_does_not_retry_on_queue_full_payload(self) -> None:
+        client = FakeClient()
+        client.book_responses = [{"message": "Prenota in lista di attesa piena"}]
+        now_box = {"value": datetime(2026, 3, 16, 18, 0, tzinfo=UTC)}
+        service = self._make_service(client, now_box)
+        occurrence = service.plan()[0]
+        service.state[occurrence.key] = BotOccurrenceState(
+            status="preflight_ok",
+            token="355132c220",
+            class_start=occurrence.class_start.isoformat(),
+            booking_opens=occurrence.booking_opens.isoformat(),
+        )
+        with self.assertRaises(VAError):
+            service._book_occurrence(self.rule, occurrence)
+        self.assertEqual(client.book_calls, ["355132c220"])
+
     def test_ensure_authenticated_logs_in_when_session_missing(self) -> None:
         client = FakeClient()
         client.saved_session = False

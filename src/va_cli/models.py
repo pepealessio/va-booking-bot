@@ -107,6 +107,8 @@ class CalendarClass:
     club: str | None = None
     room: str | None = None
     status: str | None = None
+    queue_length: int | None = None
+    available_places: int | None = None
     button_label: str | None = None
     button_href: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)

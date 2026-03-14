@@ -201,7 +201,9 @@ Output:
 Status values:
 
 - `bookable`
+- `full`
 - `queue`
+- `queue_full`
 - `unavailable`
 
 Authenticated behavior:

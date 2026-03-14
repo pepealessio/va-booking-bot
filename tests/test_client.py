@@ -111,6 +111,47 @@ AUTH_ONCLICK_CLASS_CALENDAR = """
 </div>
 """
 
+AUTH_FULL_QUEUE_CLASS_CALENDAR = """
+<div class="calendar">
+  <div class="calendarDays">
+    <div class="calendarDay changeDay selected" data-param="day_selected" data-day="2026-03-13">
+      <span>VENERDI</span><span class="dayNumber">13</span>
+    </div>
+  </div>
+  <div class="classLines">
+    <div class="calendarLesson classLine">
+      <div class="calendarLessonOrario flex-grow-1"><strong>09:15</strong> 10:00<br/>45 min.</div>
+      <div class="calendaClassName flex-grow-1">
+        <strong>Reformer</strong>
+      </div>
+      <div class="calendarLessonTrainer">Simone Nicolini</div>
+      <div class="calendarLessonClub flex-grow-1">Roma EUR<br/><span class="fw300">Lift Area</span></div>
+      <div class="calendarButton"><button type="button" class="btn btn-red" onclick="bookClass(355727,220)">Prenota in lista di attesa piena</button></div>
+    </div>
+  </div>
+</div>
+"""
+
+AUTH_NOT_AVAILABLE_CLASS_CALENDAR = """
+<div class="calendar">
+  <div class="calendarDays">
+    <div class="calendarDay changeDay selected" data-param="day_selected" data-day="2026-03-17">
+      <span>MARTEDI</span><span class="dayNumber">17</span>
+    </div>
+  </div>
+  <div class="classLines">
+    <div class="calendarLesson classLine">
+      <div class="calendarLessonOrario flex-grow-1"><strong>08:15</strong> 09:00<br/>45 min.</div>
+      <div class="calendaClassName flex-grow-1">
+        <strong>Reformer Pilates Athletic</strong>
+      </div>
+      <div class="calendarLessonClub flex-grow-1">Roma EUR<br/><span class="fw300">Studio Reformer Pilates</span></div>
+      <div class="calendarButton"><button type="button" class="btn btn-bordered-grey" id="351731c220">Prenotazioni non disponibili</button></div>
+    </div>
+  </div>
+</div>
+"""
+
 FULL_PAGE_HTML = f"<html><body>{CLASS_CALENDAR}</body></html>"
 SECOND_PAGE_CLASS_CALENDAR = """
 <div class="calendar">
@@ -343,6 +384,33 @@ class VirginActiveClientTests(unittest.TestCase):
         self.assertEqual(items[0].booking_center, "220")
         self.assertEqual(items[0].button_label, "15 utenti in attesa")
         self.assertEqual(items[0].status, "queue")
+        self.assertEqual(items[0].queue_length, 15)
+
+    def test_list_classes_full_queue_does_not_fall_back_to_bookable(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertIn("day_selected=2026-03-13", str(request.url))
+            return httpx.Response(200, json={"class_calendar": AUTH_FULL_QUEUE_CLASS_CALENDAR})
+
+        with VirginActiveClient(self.config, transport=httpx.MockTransport(handler)) as client:
+            items = client.list_classes({"date": "2026-03-13"})
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].token, "355727c220")
+        self.assertEqual(items[0].button_label, "Prenota in lista di attesa piena")
+        self.assertEqual(items[0].status, "queue_full")
+
+    def test_list_classes_non_available_booking_maps_to_full(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertIn("day_selected=2026-03-17", str(request.url))
+            return httpx.Response(200, json={"class_calendar": AUTH_NOT_AVAILABLE_CLASS_CALENDAR})
+
+        with VirginActiveClient(self.config, transport=httpx.MockTransport(handler)) as client:
+            items = client.list_classes({"date": "2026-03-17"})
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].token, "351731c220")
+        self.assertEqual(items[0].button_label, "Prenotazioni non disponibili")
+        self.assertEqual(items[0].status, "full")
 
     def test_logout_clears_session_file(self) -> None:
         session_path = Path(self.temp_dir.name) / "session.json"

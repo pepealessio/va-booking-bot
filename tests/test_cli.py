@@ -76,7 +76,36 @@ class FakeClient:
                 club="Roma Via Mantova",
                 trainer="Francesco De Rose",
                 status="queue",
+                queue_length=15,
                 button_label="15 utenti in attesa",
+            ),
+            CalendarClass(
+                index=3,
+                token="208241c232",
+                booking_id="208241",
+                booking_center="232",
+                title="Reformer",
+                date="2026-03-13",
+                start_time="19:15",
+                end_time="20:00",
+                club="Roma Via Mantova",
+                trainer="Francesco De Rose",
+                status="queue_full",
+                button_label="Prenota in lista di attesa piena",
+            ),
+            CalendarClass(
+                index=4,
+                token="208242c232",
+                booking_id="208242",
+                booking_center="232",
+                title="Matwork",
+                date="2026-03-13",
+                start_time="20:15",
+                end_time="21:00",
+                club="Roma Via Mantova",
+                trainer="Francesco De Rose",
+                status="full",
+                button_label="Prenotazioni non disponibili",
             ),
         ]
 
@@ -113,6 +142,9 @@ class CliTests(unittest.TestCase):
         self.assertIn("ID", output)
         self.assertIn("208239c232", output)
         self.assertIn("bookable", output)
+        self.assertIn("full", output)
+        self.assertIn("queue_full", output)
+        self.assertIn("15", output)
         self.assertNotIn("button_label", output)
 
     @patch("va_cli.cli.CredentialStore")

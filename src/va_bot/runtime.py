@@ -232,6 +232,10 @@ class BotService:
                     self.state_store.save(self.state)
                     self._log(f"book success rule={rule.name} token={entry.token} payload={payload!r}")
                     return
+                if self._is_queue_full_payload(payload):
+                    last_error = self._payload_text(payload)
+                    self._log(f"book queue-full failure rule={rule.name} payload={payload!r}")
+                    break
                 if not self._should_retry_payload(payload):
                     self._log(f"book non-retry failure rule={rule.name} payload={payload!r}")
                     break
@@ -240,6 +244,9 @@ class BotService:
             except Exception as exc:  # noqa: BLE001
                 last_error = str(exc)
                 self._log(f"book exception rule={rule.name} attempt={attempt} error={exc}")
+                if self._is_queue_full_text(last_error):
+                    self._log(f"book queue-full exception rule={rule.name} attempt={attempt} error={exc}")
+                    break
             self.sleep_fn(self.config.retry_interval_seconds)
         self.state[occurrence.key] = BotOccurrenceState(
             status="failed",
@@ -322,6 +329,8 @@ class BotService:
 
     def _looks_like_success(self, payload: Any) -> bool:
         text = self._payload_text(payload)
+        if self._is_queue_full_text(text):
+            return False
         lowered = text.casefold()
         return any(token in lowered for token in ("ok", "success", "prenot", "booked", "confermat"))
 
@@ -329,6 +338,23 @@ class BotService:
         text = self._payload_text(payload).casefold()
         retry_markers = ("troppo presto", "too early", "attendere", "riprov", "tempor", "timeout")
         return any(marker in text for marker in retry_markers)
+
+    def _is_queue_full_payload(self, payload: Any) -> bool:
+        return self._is_queue_full_text(self._payload_text(payload))
+
+    def _is_queue_full_text(self, text: str) -> bool:
+        lowered = text.casefold()
+        queue_full_markers = (
+            "attesa piena",
+            "lista di attesa piena",
+            "coda piena",
+            "waitlist full",
+            "full waitlist",
+            "queue full",
+            "queue is full",
+            "full queue",
+        )
+        return any(marker in lowered for marker in queue_full_markers)
 
     def _payload_text(self, payload: Any) -> str:
         if isinstance(payload, dict):

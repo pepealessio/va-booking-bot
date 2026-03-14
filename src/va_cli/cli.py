@@ -283,6 +283,8 @@ def _class_to_output(item: CalendarClass) -> dict[str, Any]:
         "trainer": item.trainer,
         "room": item.room,
         "status": item.status,
+        "queue_length": item.queue_length,
+        "available_places": item.available_places,
     }
 
 
@@ -337,6 +339,8 @@ def _column_label(column: str) -> str:
         "trainer": "Trainer",
         "room": "Room",
         "status": "Status",
+        "queue_length": "Queue",
+        "available_places": "Places",
         "label": "Name",
         "value": "Value",
         "weekday": "Weekday",

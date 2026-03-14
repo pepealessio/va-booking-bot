@@ -11,14 +11,62 @@ def _normalize(text: str) -> str:
     return " ".join(unescape(text).replace("\xa0", " ").split())
 
 
+QUEUE_LENGTH_PATTERNS = (
+    re.compile(r"(?P<count>\d+)\s+utenti?\s+in\s+attesa", re.IGNORECASE),
+    re.compile(r"(?P<count>\d+)\s+persone?\s+in\s+attesa", re.IGNORECASE),
+)
+
+AVAILABLE_PLACES_PATTERNS = (
+    re.compile(r"(?P<count>\d+)\s+posti?\s+(?:disponibili|rimasti|liberi)", re.IGNORECASE),
+    re.compile(r"ultimi\s+(?P<count>\d+)\s+posti?", re.IGNORECASE),
+)
+
+FULL_QUEUE_MARKERS = (
+    "attesa piena",
+    "lista d'attesa piena",
+    "coda piena",
+    "waitlist full",
+    "full queue",
+    "queue full",
+    "nessun posto in attesa",
+    "nessun posto in coda",
+    "posti in attesa esauriti",
+    "posti in coda esauriti",
+)
+
+FULL_MARKERS = (
+    "prenotazioni non disponibili",
+    "prenotazione non disponibile",
+    "booking not available",
+    "bookings not available",
+    "completo",
+    "completa",
+    "full",
+)
+
+
+def _extract_count(button_label: str | None, patterns: tuple[re.Pattern[str], ...]) -> int | None:
+    if not button_label:
+        return None
+    for pattern in patterns:
+        match = pattern.search(button_label)
+        if match:
+            return int(match.group("count"))
+    return None
+
+
 def _normalize_status(button_label: str | None) -> str:
     if not button_label:
         return "unavailable"
     lowered = button_label.casefold()
+    if any(marker in lowered for marker in FULL_QUEUE_MARKERS):
+        return "queue_full"
+    if any(marker in lowered for marker in ("attesa", "coda", "waitlist", "queue")):
+        return "queue"
+    if any(marker in lowered for marker in FULL_MARKERS):
+        return "full"
     if "prenota" in lowered:
         return "bookable"
-    if "attesa" in lowered:
-        return "queue"
     return "unavailable"
 
 
@@ -227,6 +275,8 @@ class CalendarClassParser(HTMLParser):
                         club=club_lines[0] if club_lines else None,
                         room=club_lines[1] if len(club_lines) > 1 else None,
                         status=_normalize_status(button_label),
+                        queue_length=_extract_count(button_label, QUEUE_LENGTH_PATTERNS),
+                        available_places=_extract_count(button_label, AVAILABLE_PLACES_PATTERNS),
                         button_label=button_label or None,
                         button_href=self._current_card.get("button_href"),
                         raw={

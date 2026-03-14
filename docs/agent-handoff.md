@@ -361,16 +361,57 @@ Current CLI behavior only accepts the composite token on `book` and `cancel`. Th
 The CLI now normalizes these labels into a stable public status field:
 
 - `bookable`
+- `full`
 - `queue`
+- `queue_full`
 - `unavailable`
 
 Current mapping:
 
 - labels containing `Prenota` -> `bookable`
-- labels containing `attesa` -> `queue`
+- labels containing sold-out markers such as `Prenotazioni non disponibili` -> `full`
+- labels containing waitlist markers such as `attesa` or `coda` -> `queue`
+- labels containing full-waitlist markers such as `attesa piena` -> `queue_full`
 - everything else -> `unavailable`
 
 The raw button text is still kept in `button_label` and `raw`.
+When the rendered button includes numeric counts, the parser also extracts:
+
+- `queue_length` from labels like `15 utenti in attesa`
+- `available_places` from labels like `3 posti disponibili`
+
+### Live Authenticated Findings
+
+Live authenticated sampling for `Roma EUR` across all available days from `2026-03-14` through `2026-03-21` showed these rendered button labels and normalized states:
+
+- `Prenota` -> `bookable`
+- `N utenti in attesa` -> `queue`
+- `Prenotazioni non disponibili` -> `full`
+
+Observed aggregate counts from that sweep:
+
+- `bookable`: 73
+- `full`: 120
+- `queue`: 48
+
+Observed per-day distribution:
+
+- `2026-03-14`: 0 classes
+- `2026-03-15`: 12 total, `2 bookable`, `10 queue`
+- `2026-03-16`: 48 total, `10 bookable`, `38 queue`
+- `2026-03-17`: 42 total, `8 bookable`, `34 full`
+- `2026-03-18`: 44 total, `7 bookable`, `37 full`
+- `2026-03-19`: 39 total, `6 bookable`, `33 full`
+- `2026-03-20`: 34 total, `22 bookable`, `12 full`
+- `2026-03-21`: 22 total, `18 bookable`, `4 full`
+
+Important interpretation notes:
+
+- `full` is a meaningful first-class state on the web calendar, not a generic fallback
+- `queue_full` did not appear in that sweep, but should remain supported for explicit full-waitlist labels such as `attesa piena`
+- `unavailable` should remain the fallback bucket for other rendered states such as `Troppo tardi`
+- queue counts are available from the web calendar only when the label itself includes them, for example `15 utenti in attesa`
+- no available-place counts were observed in the web calendar labels during this sweep, even though the Android app appears to expose richer availability data
 
 ## Automatic Booking Model
 
