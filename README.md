@@ -19,6 +19,15 @@ The project talks directly to the Virgin Active Italy web endpoints used by the 
 - direct booking and cancellation by composite class token
 - debug commands for auth checks and filter discovery
 
+### `va automate` — recurring booking automation
+
+- interactive class selection (club, course, day of week, time)
+- automatic crontab scheduling (login 5 min before, book at opening, both 48 h before class)
+- per-class retry logic with configurable max attempts and interval
+- session recovery on expiry during cron runs
+- Telegram push notifications on booking success or failure
+- configuration via `.va_state/automate.yaml`
+
 ## Important Disclaimer
 
 This project is unofficial and depends on live Virgin Active Italy web behavior. It may stop working if the site changes its markup, auth flow, or booking endpoints.
@@ -226,6 +235,101 @@ venv/bin/va debug clubs
 venv/bin/va debug targets
 venv/bin/va debug dates --club "Roma EUR"
 ```
+
+### Automate — Recurring Booking
+
+The `automate` subcommand lets you configure recurring class bookings that run automatically via cron.
+
+**Add a recurring class (interactive):**
+
+```bash
+venv/bin/va automate add
+```
+
+This walks you through selecting:
+
+1. Club
+2. Course (or any)
+3. Day of week (Mon–Sun)
+4. Specific class (shown for the nearest matching date)
+5. Retry settings (max retries, interval in seconds — default 10 retries, 60 s)
+
+At the end it shows the computed cron schedule and offers to install crontab entries.
+
+**Manage configured classes:**
+
+```bash
+venv/bin/va automate list                  # show all recurring classes + cron times
+venv/bin/va automate remove <class_id>     # remove a class from config
+```
+
+**Crontab management:**
+
+```bash
+venv/bin/va automate schedule              # install or update crontab entries
+venv/bin/va automate unschedule            # remove all automation entries from crontab
+```
+
+Each class generates two cron entries:
+
+- **Login** — 5 minutes before the booking attempt (fresh session)
+- **Book** — exactly 48 hours before the class starts
+
+Example: a Monday 18:00 class → login Saturday 17:55, book Saturday 18:00.
+
+**Retry behavior:**
+
+The booking worker retries on failure (HTTP error, session expiry, non-200 response). Each retry re-searches for the class and attempts booking. Per-class settings (`max_retries`, `retry_interval`) control how long it keeps trying. All attempts are logged to `.va_state/automate.log`.
+
+If the session expires mid-retry, the worker re-logs in and tries again.
+
+**Internal cron workers** (called by crontab, not meant for manual use):
+
+```bash
+venv/bin/va automate cron-login            # performs login, saves session
+venv/bin/va automate cron-book --class <id> # finds class, books with retry loop
+```
+
+#### Telegram Notifications
+
+When a booking succeeds or all retries are exhausted, the bot can send a push notification to your Telegram chat. See the full setup guide at [`docs/telegram-setup.md`](docs/telegram-setup.md).
+
+Add the `notify` section to `.va_state/automate.yaml`:
+
+```yaml
+workdir: /home/user/va-booking-bot
+notify:
+  provider: telegram
+  token: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+  chat_id: "987654321"
+classes:
+  - id: abc123
+    club: "Roma EUR"
+    course: "Yoga Calm"
+    day_of_week: 1
+    time: "18:00"
+    max_retries: 10
+    retry_interval: 60
+```
+
+Keep secrets out of the YAML by using env vars instead:
+
+| Variable | Overwrites |
+| --- | --- |
+| `VA_NOTIFY_TOKEN` | `notify.token` |
+| `VA_NOTIFY_CHAT_ID` | `notify.chat_id` |
+
+Notifications are only sent on **booking success** and **fatal booking failure** (all retries exhausted). Transient intermediate retries are silent.
+
+Example messages:
+
+- `✅ Booking confirmed: Roma EUR/Yoga Calm @ 18:00 (attempt 1)`
+- `❌ Booking failed: Roma EUR/Yoga Calm @ 18:00 after 10 attempts`
+- `❌ Login failed: Missing VA_USERNAME or VA_PASSWORD.`
+
+#### Configuration File
+
+All automation config is stored in `.va_state/automate.yaml`. The `workdir` is auto-detected and used by cron entries to `cd` into the correct directory before running `va`.
 
 ### Global Flags
 

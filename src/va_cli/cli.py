@@ -9,6 +9,15 @@ from typing import Any
 
 import httpx
 
+from .automate import (
+    cmd_add,
+    cmd_cron_book,
+    cmd_cron_login,
+    cmd_list,
+    cmd_remove,
+    cmd_schedule,
+    cmd_unschedule,
+)
 from .client import VAError, VirginActiveClient
 from .config import Config
 from .credentials import CredentialStore
@@ -54,6 +63,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_filter_args(debug_dates, include_date=False)
     for name in ("courses", "trainers", "clubs", "targets"):
         debug_sub.add_parser(name, help=f"List available {name}.")
+
+    auto = subparsers.add_parser("automate", help="Recurring booking automation.")
+    auto_sub = auto.add_subparsers(dest="automate_command", required=True)
+    auto_sub.add_parser("add", help="Interactively add a recurring class booking.")
+    auto_sub.add_parser("list", help="Show configured recurring classes.")
+    auto_rm = auto_sub.add_parser("remove", help="Remove a recurring class.")
+    auto_rm.add_argument("class_id", help="Class configuration ID.")
+    auto_sub.add_parser("schedule", help="Install/update crontab entries.")
+    auto_sub.add_parser("unschedule", help="Remove crontab entries.")
+    auto_sub.add_parser("cron-login", help="[internal] Cron worker: login.")
+    auto_book = auto_sub.add_parser("cron-book", help="[internal] Cron worker: book.")
+    auto_book.add_argument("--class", dest="class_id", required=True)
 
     return parser
 
@@ -116,6 +137,23 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
         return [item.to_dict() for item in getattr(filters, args.debug_command)]
     if args.command == "debug" and args.debug_command == "dates":
         return [item.to_dict() for item in client.get_calendar_dates(_filters_from_args(args))]
+    if args.command == "automate":
+        cmd = getattr(args, "automate_command", None)
+        if cmd == "add":
+            return cmd_add(client)
+        if cmd == "list":
+            return cmd_list(client.config.state_dir)
+        if cmd == "remove":
+            return cmd_remove(client.config.state_dir, args.class_id)
+        if cmd == "schedule":
+            return cmd_schedule(client.config.state_dir)
+        if cmd == "unschedule":
+            return cmd_unschedule(client.config.state_dir)
+        if cmd == "cron-login":
+            return cmd_cron_login(client.config.state_dir)
+        if cmd == "cron-book":
+            return cmd_cron_book(client.config.state_dir, args.class_id)
+        raise VAError("Unknown automate subcommand.")
     raise VAError("Unknown command.")
 
 

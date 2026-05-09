@@ -15,6 +15,7 @@ import yaml
 
 from .client import VAError, VirginActiveClient
 from .config import Config
+from .notifier import from_config, Notifier
 
 
 # ── AutomateConfig ─────────────────────────────────────────────────
@@ -265,15 +266,19 @@ def _setup_logger(state_dir: Path) -> logging.Logger:
 def worker_cron_login(state_dir: Path) -> dict[str, Any]:
     """Cron-triggered login worker. Restores credentials from .env/keyring."""
     logger = _setup_logger(state_dir)
+    cfg = AutomateConfig(state_dir).load()
+    notifier: Notifier = from_config(cfg.get("notify"))
     config = Config.from_env()
     logger.info("cron-login: starting")
     try:
         with VirginActiveClient(config, verbose=False) as client:
             session = client.login()
             logger.info("cron-login: success, session updated")
+            notifier.send("success", "Login successful, session updated.")
             return {"status": "success"}
     except Exception as e:
         logger.error(f"cron-login: failed: {e}")
+        notifier.send("error", f"Login failed: {e}")
         raise
 
 
@@ -301,6 +306,9 @@ def worker_cron_book(
     max_retries = cls.get("max_retries", 10)
     retry_interval = cls.get("retry_interval", 60)
     logger = _setup_logger(state_dir)
+    notifier: Notifier = from_config(data.get("notify"))
+
+    class_desc = f"{cls.get('club', '?')}/{cls.get('course', '?')} @ {cls['time']}"
 
     logger.info(
         f"cron-book: starting for {cls_id} "
@@ -317,6 +325,10 @@ def worker_cron_book(
             status_code = result.get("StatusCode", result.get("statusCode"))
             if status_code == 200 or (isinstance(status_code, str) and status_code == "200"):
                 logger.info(f"cron-book: SUCCESS on attempt {attempt}")
+                notifier.send(
+                    "success",
+                    f"Booking confirmed: **{class_desc}** (attempt {attempt})",
+                )
                 return {"status": "success", "class_id": cls_id, "attempts": attempt}
             else:
                 logger.warning(f"cron-book: non-200 status: {result}")
@@ -331,6 +343,7 @@ def worker_cron_book(
             _sleep_retry(attempt, max_retries, retry_interval)
 
     logger.error(f"cron-book: FAILED after {max_retries} attempts for {cls_id}")
+    notifier.send("error", f"Booking failed: **{class_desc}** after {max_retries} attempts")
     raise VAError(
         f"Failed to book class {cls_id} after {max_retries} attempts"
     )
