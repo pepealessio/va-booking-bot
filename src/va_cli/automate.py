@@ -356,14 +356,16 @@ def interactive_add(
     else:
         max_retries_text = questionary.text(
             "Max retries (default 10):",
-            default="10",
         ).ask()
+        if max_retries_text is None:
+            raise VAError("Aborted by user")
         max_retries_val = int(max_retries_text) if max_retries_text else 10
 
         retry_interval_text = questionary.text(
             "Retry interval in seconds (default 60):",
-            default="60",
         ).ask()
+        if retry_interval_text is None:
+            raise VAError("Aborted by user")
         retry_interval_val = int(retry_interval_text) if retry_interval_text else 60
 
     if not raw:
