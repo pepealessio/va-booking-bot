@@ -94,6 +94,14 @@ def _add_filter_args(parser: argparse.ArgumentParser, *, include_date: bool = Tr
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        return _run_main(argv)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except EOFError:
+        sys.exit(130)
+
+def _run_main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_args(parser, args)
