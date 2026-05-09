@@ -91,8 +91,7 @@ def build_cron_entry(
         cron["book_minute"], cron["book_hour"], cron["book_dow"], va_bin,
         club, course_part, day_of_week, time_str, max_retries, retry_interval, marker,
     )
-    comment = "# %s — %s — %s %s" % (
-        club, course or "any class", DOW_NAMES[day_of_week], time_str)
+    comment = "# %s — %s — %s %s" % (club, course or "any class", DOW_NAMES[day_of_week], time_str)
     return [comment, login_line, book_line]
 
 
@@ -372,6 +371,7 @@ def interactive_add(client: VirginActiveClient) -> dict[str, Any]:
     if not confirmed:
         raise VAError("Aborted by user")
 
+    entry_id = _generate_id()
     lines = build_cron_entry(
         club=club_label,
         course=course_label,
@@ -379,17 +379,35 @@ def interactive_add(client: VirginActiveClient) -> dict[str, Any]:
         time_str=time_str,
         max_retries=max_retries_val,
         retry_interval=retry_interval_val,
+        entry_id=entry_id,
     )
     print()
     print("Copy these lines into your crontab (`crontab -e`):")
     print()
     for line in lines:
         print(f"  {line}")
+    print()
+    print(f"  Listing entries:    va automate list")
+    print(f"  Remove this entry:  va automate remove {entry_id}")
 
     return {
         "status": "success",
         "lines": lines,
+        "entry_id": entry_id,
     }
+
+
+# ── CLI entry points ──────────────────────────────────────────────
+
+
+def cmd_add(client: VirginActiveClient) -> Any:
+    if not client.has_saved_session():
+        print("No saved session. Logging in first...")
+        try:
+            client.login()
+        except VAError as e:
+            return {"status": "error", "error": str(e)}
+    return interactive_add(client)
 
 
 # ── List / remove from crontab ────────────────────────────────────
@@ -416,54 +434,11 @@ def _write_crontab(content: str) -> None:
         raise VAError(f"Failed to write crontab: {proc.stderr.strip()}")
 
 
-def _cronline_to_dict(line: str) -> dict[str, str] | None:
-    """Parse a va-automate book cron line into a dict with id, club, course, day, time."""
-    if not line.strip() or line.startswith("#"):
-        return None
-    if "--recurring" not in line:
-        return None
-    parts = line.split()
-    marker = None
-    for part in parts:
-        if "va-automate:" in part and VA_MARKER_PREFIX in line:
-            marker = part
-            break
-    if not marker:
-        return None
-
-    entry_id = marker.split("va-automate:")[1]
-    club = course = day_str = time_val = ""
-
-    for i, part in enumerate(parts):
-        if part == "--club" and i + 1 < len(parts):
-            club = _join_quoted(parts, i + 1).strip("'\"")
-        elif part == "--course" and i + 1 < len(parts):
-            course = _join_quoted(parts, i + 1).strip("'\"")
-        elif part == "--day" and i + 1 < len(parts):
-            day_str = parts[i + 1]
-        elif part == "--time" and i + 1 < len(parts):
-            time_val = parts[i + 1].strip("'\"")
-
-    try:
-        day_name = DOW_NAMES[int(day_str)] if day_str.isdigit() else day_str
-    except (ValueError, IndexError):
-        day_name = day_str
-
-    return {
-        "id": entry_id,
-        "club": club,
-        "course": course or "any",
-        "day": day_name,
-        "time": time_val,
-    }
-
-
 def _join_quoted(parts: list[str], idx: int) -> str:
     """Join a sequence of tokens that were split by shell quoting."""
     if idx >= len(parts):
         return ""
     first = parts[idx]
-    # If starts with a quote, keep collecting until matching close quote
     if first.startswith("'"):
         if first.endswith("'"):
             return first
@@ -483,6 +458,35 @@ def _join_quoted(parts: list[str], idx: int) -> str:
                 break
         return " ".join(tokens)
     return first
+
+
+def _cronline_to_dict(line: str) -> dict[str, str] | None:
+    """Parse a va-automate book cron line into a dict with id, club, course, day, time."""
+    if not line.strip() or line.startswith("#"):
+        return None
+    if "--recurring" not in line:
+        return None
+    parts = line.split()
+    marker_token = None
+    for part in parts:
+        if "va-automate:" in part and VA_MARKER_PREFIX in line:
+            marker_token = part
+            break
+    if not marker_token:
+        return None
+
+    entry_id = marker_token.split("va-automate:")[1]
+    club = course = day_str = time_val = ""
+
+    for i, part in enumerate(parts):
+        if part == "--club" and i + 1 < len(parts):
+            club = _join_quoted(parts, i + 1).strip("'\"")
+        elif part == "--course" and i + 1 < len(parts):
+            course = _join_quoted(parts, i + 1).strip("'\"")
+        elif part == "--day" and i + 1 < len(parts):
+            day_str = parts[i + 1]
+        elif part == "--time" and i + 1 < len(parts):
+            time_val = parts[i + 1].strip("'\"")
 
     try:
         day_name = DOW_NAMES[int(day_str)] if day_str.isdigit() else day_str
@@ -529,26 +533,10 @@ def cmd_remove(entry_id: str) -> Any:
     if removed_count == 0:
         raise VAError(f"No booking entry with id={entry_id}")
 
-    # Remove adjacent comment lines (blank lines and the comment right before a removed line)
-    # to keep crontab clean
     content = "\n".join(new_lines)
-    # Clean up double blank lines left behind
     content = "\n\n\n".join(content.split("\n\n\n"))
     _write_crontab(content)
     return {
         "status": "success",
         "removed": entry_id,
     }
-
-
-# ── CLI entry points ──────────────────────────────────────────────
-
-
-def cmd_add(client: VirginActiveClient) -> Any:
-    if not client.has_saved_session():
-        print("No saved session. Logging in first...")
-        try:
-            client.login()
-        except VAError as e:
-            return {"status": "error", "error": str(e)}
-    return interactive_add(client)
