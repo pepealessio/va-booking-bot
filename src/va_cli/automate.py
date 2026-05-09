@@ -34,29 +34,33 @@ def compute_cron_times(
     booking_open_hours: int = 48,
     login_offset_minutes: int = 5,
 ) -> dict[str, Any]:
-    """Return book and login cron minute/hour/DOW strings for a recurring class.
+    """Return book and login cron minute/hour/DOW for a recurring class.
 
     Each class gets two cron entries:
       - login: login_offset_minutes before book (5 min)
       - book:  exactly booking_open_hours before the class (48 h)
+
+    Computed as pure minute arithmetic — no calendar dates involved.
     """
     h, m = map(int, time_str.split(":"))
-    class_time = datetime(2026, 1, 1, h, m)
-    book_time = class_time - timedelta(hours=booking_open_hours)
-    login_time = book_time - timedelta(minutes=login_offset_minutes)
+    class_minute = h * 60 + m
+    day_minutes = 24 * 60
 
-    cls_date = datetime(2026, 1, 12 + py_dow, h, m)  # 2026-01-12 is Monday, with actual time
-    book_date = cls_date - timedelta(hours=booking_open_hours)
-    login_date = book_date - timedelta(minutes=login_offset_minutes)
+    result: dict[str, Any] = {}
+    for label, minutes_back in (
+        ("book", booking_open_hours * 60),
+        ("login", booking_open_hours * 60 + login_offset_minutes),
+    ):
+        diff = class_minute - (minutes_back % day_minutes)
+        extra_days = minutes_back // day_minutes
+        if diff < 0:
+            diff += day_minutes
+            extra_days += 1
+        result[f"{label}_hour"] = diff // 60
+        result[f"{label}_minute"] = diff % 60
+        result[f"{label}_dow"] = _python_dow_to_cron((py_dow - extra_days) % 7)
 
-    return {
-        "book_hour": book_time.hour,
-        "book_minute": book_time.minute,
-        "book_dow": _python_dow_to_cron(book_date.weekday()),
-        "login_hour": login_time.hour,
-        "login_minute": login_time.minute,
-        "login_dow": _python_dow_to_cron(login_date.weekday()),
-    }
+    return result
 
 
 VA_MARKER_PREFIX = "# va-automate:"
