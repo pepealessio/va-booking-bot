@@ -14,9 +14,9 @@ from va_cli.automate import (
     VA_MARKER_PREFIX,
     _cronline_to_dict,
     _do_book_attempt,
+    _do_remove,
     build_cron_entry,
     cmd_list,
-    cmd_remove,
     compute_cron_times,
     interactive_add,
     worker_book_recurring,
@@ -559,16 +559,14 @@ class CmdRemoveTests(unittest.TestCase):
 
         with patch("va_cli.automate._read_crontab", return_value=crontab):
             with patch("va_cli.automate._write_crontab", side_effect=_fake_write):
-                result = cmd_remove("abc12345")
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["removed"], "abc12345")
+                _do_remove("abc12345")
         self.assertEqual(len(written), 1)
         self.assertNotIn("abc12345", written[0])
 
     def test_not_found_raises(self) -> None:
         with patch("va_cli.automate._read_crontab", return_value="00 00 * * * echo hello"):
             with self.assertRaises(VAError) as exc:
-                cmd_remove("nonexistent")
+                _do_remove("nonexistent")
         self.assertIn("nonexistent", str(exc.exception))
 
 

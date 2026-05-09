@@ -70,8 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     auto_sub.add_parser("cron-login", help="[internal] Cron worker: login.")
     list_parser = auto_sub.add_parser("list", help="List recurring booking entries from crontab.")
     list_parser.add_argument("--json", action="store_true", dest="list_as_json")
-    remove_parser = auto_sub.add_parser("remove", help="Remove a recurring booking entry from crontab.")
-    remove_parser.add_argument("id", help="Booking entry ID (from va automate list)")
+    auto_sub.add_parser("remove", help="Interactively select and remove a booking entry from crontab.")
 
     return parser
 
@@ -156,7 +155,7 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             result = cmd_list()
             return result
         if cmd == "remove":
-            return cmd_remove(args.id)
+            return cmd_remove()
         raise VAError("Unknown automate subcommand.")
     raise VAError("Unknown command.")
 

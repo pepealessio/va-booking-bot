@@ -517,7 +517,33 @@ def cmd_list() -> Any:
     }
 
 
-def cmd_remove(entry_id: str) -> Any:
+def cmd_remove() -> Any:
+    """Interactively select and remove a booking entry from crontab."""
+    result = cmd_list()
+    entries = result["entries"]
+    if not entries:
+        raise VAError("No booking entries found in crontab")
+
+    choices = [
+        f"{e['id']}: {e['club']} — {e['course'] or 'any'} — {e['day']} {e['time']}"
+        for e in entries
+    ]
+    choice = questionary.select(
+        "Select entry to remove:",
+        choices=choices,
+    ).ask()
+    if not choice:
+        raise VAError("Aborted")
+
+    entry_id = choice.split(":")[0].strip()
+    _do_remove(entry_id)
+    return {
+        "status": "success",
+        "removed": entry_id,
+    }
+
+
+def _do_remove(entry_id: str) -> None:
     """Remove booking entry with the given ID from crontab."""
     content = _read_crontab()
     if not content:
@@ -536,7 +562,3 @@ def cmd_remove(entry_id: str) -> Any:
     content = "\n".join(new_lines)
     content = "\n\n\n".join(content.split("\n\n\n"))
     _write_crontab(content)
-    return {
-        "status": "success",
-        "removed": entry_id,
-    }
