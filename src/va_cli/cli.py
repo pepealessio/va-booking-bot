@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from .automate import cmd_add, worker_book_recurring
+from .automate import cmd_add, cmd_list, cmd_remove, worker_book_recurring
 from .client import VAError, VirginActiveClient
 from .config import Config
 from .credentials import CredentialStore
@@ -68,6 +68,10 @@ def build_parser() -> argparse.ArgumentParser:
     auto_sub = auto.add_subparsers(dest="automate_command", required=True)
     auto_sub.add_parser("add", help="Interactively select a class and print cron entries.")
     auto_sub.add_parser("cron-login", help="[internal] Cron worker: login.")
+    list_parser = auto_sub.add_parser("list", help="List recurring booking entries from crontab.")
+    list_parser.add_argument("--json", action="store_true", dest="list_as_json")
+    remove_parser = auto_sub.add_parser("remove", help="Remove a recurring booking entry from crontab.")
+    remove_parser.add_argument("id", help="Booking entry ID (from va automate list)")
 
     return parser
 
@@ -148,6 +152,11 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             return cmd_add(client)
         if cmd == "cron-login":
             return {"status": "success"}
+        if cmd == "list":
+            result = cmd_list()
+            return result
+        if cmd == "remove":
+            return cmd_remove(args.id)
         raise VAError("Unknown automate subcommand.")
     raise VAError("Unknown command.")
 

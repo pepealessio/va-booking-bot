@@ -11,8 +11,12 @@ import httpx
 
 from va_cli import cli
 from va_cli.automate import (
+    VA_MARKER_PREFIX,
+    _cronline_to_dict,
     _do_book_attempt,
     build_cron_entry,
+    cmd_list,
+    cmd_remove,
     compute_cron_times,
     interactive_add,
     worker_book_recurring,
@@ -459,6 +463,113 @@ class CliRecurringTests(unittest.TestCase):
             with redirect_stdout(stdout):
                 code = cli.main(["automate", "cron-login"])
         self.assertEqual(code, 0)
+
+
+# =====================================================================
+# 11. Crontab entry ID marker (3 tests)
+# =====================================================================
+
+
+class CronEntryMarkerTests(unittest.TestCase):
+
+    def test_marker_in_login_and_book(self) -> None:
+        lines = build_cron_entry("Roma EUR", 0, "18:00", entry_id="abc12345")
+        self.assertIn(VA_MARKER_PREFIX + "abc12345", lines[1])
+        self.assertIn(VA_MARKER_PREFIX + "abc12345", lines[2])
+
+    def test_marker_not_in_comment(self) -> None:
+        lines = build_cron_entry("Roma EUR", 0, "18:00", entry_id="abc12345")
+        self.assertNotIn(VA_MARKER_PREFIX, lines[0])
+
+    def test_auto_generates_id_when_none(self) -> None:
+        lines = build_cron_entry("Roma EUR", 0, "18:00")
+        for i in (1, 2):
+            self.assertIn(VA_MARKER_PREFIX, lines[i])
+
+
+# =====================================================================
+# 12. Cronline parser (3 tests)
+# =====================================================================
+
+
+class CronlineParserTests(unittest.TestCase):
+
+    def test_parses_book_line(self) -> None:
+        line = "00 18 * * 6 va book --recurring --club 'Roma EUR' --course 'Yoga' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345"
+        result = _cronline_to_dict(line)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["id"], "abc12345")
+        self.assertEqual(result["club"], "Roma EUR")
+        self.assertEqual(result["course"], "Yoga")
+        self.assertEqual(result["day"], "Monday")
+        self.assertEqual(result["time"], "18:00")
+
+    def test_skips_login_line(self) -> None:
+        line = "55 17 * * 5 va login # va-automate:abc12345"
+        result = _cronline_to_dict(line)
+        self.assertIsNone(result)
+
+    def test_skips_comment_line(self) -> None:
+        result = _cronline_to_dict("# Roma EUR — Yoga — Monday 18:00")
+        self.assertIsNone(result)
+
+
+# =====================================================================
+# 13. List command (2 tests)
+# =====================================================================
+
+
+class CmdListTests(unittest.TestCase):
+
+    def test_empty_crontab(self) -> None:
+        with patch("va_cli.automate._read_crontab", return_value=""):
+            result = cmd_list()
+        self.assertEqual(result["total"], 0)
+        self.assertEqual(result["entries"], [])
+
+    def test_returns_entries(self) -> None:
+        crontab = (
+            "# Roma EUR\n"
+            "55 17 * * 5 va login # va-automate:abc12345\n"
+            "00 18 * * 6 va book --recurring --club 'Roma EUR' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345\n"
+        )
+        with patch("va_cli.automate._read_crontab", return_value=crontab):
+            result = cmd_list()
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["entries"][0]["id"], "abc12345")
+
+
+# =====================================================================
+# 14. Remove command (2 tests)
+# =====================================================================
+
+
+class CmdRemoveTests(unittest.TestCase):
+
+    def test_found_and_removed(self) -> None:
+        crontab = (
+            "# Yoga\n"
+            "55 17 * * 5 va login # va-automate:abc12345\n"
+            "00 18 * * 6 va book --recurring --club 'Roma EUR' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345\n"
+        )
+        written: list[str] = []
+
+        def _fake_write(content: str) -> None:
+            written.append(content)
+
+        with patch("va_cli.automate._read_crontab", return_value=crontab):
+            with patch("va_cli.automate._write_crontab", side_effect=_fake_write):
+                result = cmd_remove("abc12345")
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["removed"], "abc12345")
+        self.assertEqual(len(written), 1)
+        self.assertNotIn("abc12345", written[0])
+
+    def test_not_found_raises(self) -> None:
+        with patch("va_cli.automate._read_crontab", return_value="00 00 * * * echo hello"):
+            with self.assertRaises(VAError) as exc:
+                cmd_remove("nonexistent")
+        self.assertIn("nonexistent", str(exc.exception))
 
 
 if __name__ == "__main__":

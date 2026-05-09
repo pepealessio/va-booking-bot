@@ -58,6 +58,16 @@ def compute_cron_times(
     }
 
 
+VA_MARKER_PREFIX = "# va-automate:"
+
+
+def _generate_id() -> str:
+    """Generate a short, unique ID for a cron entry set."""
+    import random
+    chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+    return "".join(random.choices(chars, k=8))
+
+
 def build_cron_entry(
     club: str,
     day_of_week: int,
@@ -66,18 +76,23 @@ def build_cron_entry(
     max_retries: int = 10,
     retry_interval: int = 60,
     va_bin: str = "va",
+    entry_id: str | None = None,
 ) -> list[str]:
     """Return two cron lines (login + book) as strings for copy-paste."""
+    if entry_id is None:
+        entry_id = _generate_id()
     cron = compute_cron_times(day_of_week, time_str)
     course_part = f" --course '{course}'" if course else ""
-    login_line = "%02d %02d * * %d %s login" % (
-        cron["login_minute"], cron["login_hour"], cron["login_dow"], va_bin,
+    marker = f"{VA_MARKER_PREFIX}{entry_id}"
+    login_line = "%02d %02d * * %d %s login %s" % (
+        cron["login_minute"], cron["login_hour"], cron["login_dow"], va_bin, marker,
     )
-    book_line = "%02d %02d * * %d %s book --recurring --club '%s'%s --day %d --time '%s' --retry %d --retry-interval %d" % (
+    book_line = "%02d %02d * * %d %s book --recurring --club '%s'%s --day %d --time '%s' --retry %d --retry-interval %d %s" % (
         cron["book_minute"], cron["book_hour"], cron["book_dow"], va_bin,
-        club, course_part, day_of_week, time_str, max_retries, retry_interval,
+        club, course_part, day_of_week, time_str, max_retries, retry_interval, marker,
     )
-    comment = "# %s — %s — %s %s" % (club, course or "any class", DOW_NAMES[day_of_week], time_str)
+    comment = "# %s — %s — %s %s" % (
+        club, course or "any class", DOW_NAMES[day_of_week], time_str)
     return [comment, login_line, book_line]
 
 
@@ -374,6 +389,155 @@ def interactive_add(client: VirginActiveClient) -> dict[str, Any]:
     return {
         "status": "success",
         "lines": lines,
+    }
+
+
+# ── List / remove from crontab ────────────────────────────────────
+
+
+def _read_crontab() -> str:
+    """Return the current crontab content as a string."""
+    import subprocess
+    result = subprocess.run(
+        ["crontab", "-l"], capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout
+
+
+def _write_crontab(content: str) -> None:
+    """Write content to the user's crontab."""
+    import subprocess
+    proc = subprocess.run(
+        ["crontab", "-"], input=content, capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        raise VAError(f"Failed to write crontab: {proc.stderr.strip()}")
+
+
+def _cronline_to_dict(line: str) -> dict[str, str] | None:
+    """Parse a va-automate book cron line into a dict with id, club, course, day, time."""
+    if not line.strip() or line.startswith("#"):
+        return None
+    if "--recurring" not in line:
+        return None
+    parts = line.split()
+    marker = None
+    for part in parts:
+        if "va-automate:" in part and VA_MARKER_PREFIX in line:
+            marker = part
+            break
+    if not marker:
+        return None
+
+    entry_id = marker.split("va-automate:")[1]
+    club = course = day_str = time_val = ""
+
+    for i, part in enumerate(parts):
+        if part == "--club" and i + 1 < len(parts):
+            club = _join_quoted(parts, i + 1).strip("'\"")
+        elif part == "--course" and i + 1 < len(parts):
+            course = _join_quoted(parts, i + 1).strip("'\"")
+        elif part == "--day" and i + 1 < len(parts):
+            day_str = parts[i + 1]
+        elif part == "--time" and i + 1 < len(parts):
+            time_val = parts[i + 1].strip("'\"")
+
+    try:
+        day_name = DOW_NAMES[int(day_str)] if day_str.isdigit() else day_str
+    except (ValueError, IndexError):
+        day_name = day_str
+
+    return {
+        "id": entry_id,
+        "club": club,
+        "course": course or "any",
+        "day": day_name,
+        "time": time_val,
+    }
+
+
+def _join_quoted(parts: list[str], idx: int) -> str:
+    """Join a sequence of tokens that were split by shell quoting."""
+    if idx >= len(parts):
+        return ""
+    first = parts[idx]
+    # If starts with a quote, keep collecting until matching close quote
+    if first.startswith("'"):
+        if first.endswith("'"):
+            return first
+        tokens = [first]
+        for j in range(idx + 1, len(parts)):
+            tokens.append(parts[j])
+            if tokens[-1].endswith("'"):
+                break
+        return " ".join(tokens)
+    elif first.startswith('"'):
+        if first.endswith('"'):
+            return first
+        tokens = [first]
+        for j in range(idx + 1, len(parts)):
+            tokens.append(parts[j])
+            if tokens[-1].endswith('"'):
+                break
+        return " ".join(tokens)
+    return first
+
+    try:
+        day_name = DOW_NAMES[int(day_str)] if day_str.isdigit() else day_str
+    except (ValueError, IndexError):
+        day_name = day_str
+
+    return {
+        "id": entry_id,
+        "club": club,
+        "course": course or "any",
+        "day": day_name,
+        "time": time_val,
+    }
+
+
+def cmd_list() -> Any:
+    """Return list of booking entries managed by the va bot."""
+    lines = _read_crontab().splitlines()
+    entries: list[dict[str, str]] = []
+    for line in lines:
+        if VA_MARKER_PREFIX in line:
+            entry = _cronline_to_dict(line)
+            if entry:
+                entries.append(entry)
+    return {
+        "total": len(entries),
+        "entries": entries,
+    }
+
+
+def cmd_remove(entry_id: str) -> Any:
+    """Remove booking entry with the given ID from crontab."""
+    content = _read_crontab()
+    if not content:
+        raise VAError("No crontab found")
+
+    target = f"{VA_MARKER_PREFIX}{entry_id}"
+    lines = content.splitlines()
+    new_lines = [
+        line for line in lines
+        if not (line.strip() and target in line)
+    ]
+    removed_count = len(lines) - len(new_lines)
+    if removed_count == 0:
+        raise VAError(f"No booking entry with id={entry_id}")
+
+    # Remove adjacent comment lines (blank lines and the comment right before a removed line)
+    # to keep crontab clean
+    content = "\n".join(new_lines)
+    # Clean up double blank lines left behind
+    content = "\n\n\n".join(content.split("\n\n\n"))
+    _write_crontab(content)
+    return {
+        "status": "success",
+        "removed": entry_id,
     }
 
 
