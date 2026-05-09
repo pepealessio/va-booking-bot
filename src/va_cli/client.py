@@ -427,9 +427,6 @@ class VirginActiveClient:
         return value
 
     def _decode_payload(self, response: httpx.Response) -> Any:
-        content_type = response.headers.get("content-type", "")
-        if "json" in content_type:
-            return response.json()
         try:
             return response.json()
         except json.JSONDecodeError:

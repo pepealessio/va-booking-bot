@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -110,14 +111,6 @@ def _setup_logger(state_dir: Path) -> logging.Logger:
     handler.setFormatter(logging.Formatter(_LOG_FORMAT))
     logger.addHandler(handler)
     return logger
-
-
-# ── Worker: cron-login (thin, calls login via client param) ────────
-
-
-def worker_cron_login() -> dict[str, Any]:
-    """Cron-triggered login worker. Called with client already created by cli.py."""
-    return {"status": "success"}
 
 
 # ── Worker: book --recurring ──────────────────────────────────────
@@ -560,5 +553,5 @@ def _do_remove(entry_id: str) -> None:
         raise VAError(f"No booking entry with id={entry_id}")
 
     content = "\n".join(new_lines)
-    content = "\n\n\n".join(content.split("\n\n\n"))
+    content = re.sub(r"\n{3,}", "\n\n", content).rstrip("\n") + "\n" if content else ""
     _write_crontab(content)

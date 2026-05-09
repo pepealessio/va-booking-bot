@@ -51,9 +51,9 @@ class TelegramNotifier:
 
 
 def from_config(notify_cfg: dict[str, Any] | None) -> Notifier:
-    """Build a notifier from the top-level `notify` YAML block.
+    """Build a notifier from a config dict.
 
-    Env vars `VA_NOTIFY_TOKEN` and `VA_NOTIFY_CHAT_ID` override the YAML values.
+    Env vars `VA_NOTIFY_TOKEN` and `VA_NOTIFY_CHAT_ID` override the dict values.
     Falls back to `NullNotifier` when configuration is incomplete.
     """
     if not notify_cfg:
