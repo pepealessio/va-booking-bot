@@ -7,7 +7,7 @@ name = "va-book-bot"
 version = "0.2.2"
 description = "CLI tooling for Virgin Active Italy class discovery and booking workflows."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
   "httpx>=0.28,<0.29",
   "keyring>=25.0,<26.0",
