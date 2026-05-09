@@ -419,9 +419,6 @@ def interactive_add(
 
     return {
         "status": "success",
-        "lines": lines,
-        "entry_id": entry_id,
-        "installed": install,
     }
 
 
