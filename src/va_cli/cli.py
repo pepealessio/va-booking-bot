@@ -66,11 +66,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     auto = subparsers.add_parser("automate", help="Recurring booking automation helpers.")
     auto_sub = auto.add_subparsers(dest="automate_command", required=True)
-    auto_sub.add_parser("add", help="Interactively select a class and print cron entries.")
+
+    add_parser = auto_sub.add_parser("add", help="Interactively select a class and create cron entries.")
+    add_parser.add_argument("--install", action="store_true", help="Automatically install cron entries into crontab.")
+    add_parser.add_argument("--raw", action="store_true", help="Print only cron lines (no commentary), suitable for piping to crontab.")
+
     auto_sub.add_parser("cron-login", help="[internal] Cron worker: login.")
+
     list_parser = auto_sub.add_parser("list", help="List recurring booking entries from crontab.")
     list_parser.add_argument("--json", action="store_true", dest="list_as_json")
-    auto_sub.add_parser("remove", help="Interactively select and remove a booking entry from crontab.")
+    list_parser.add_argument("--raw", action="store_true", help="Print only cron lines from all va-automate entries, suitable for piping.")
+
+    remove_parser = auto_sub.add_parser("remove", help="Remove a booking entry from crontab.")
+    remove_parser.add_argument("entry_id", nargs="?", default=None, help="Entry ID to remove (skips interactive prompt).")
+    remove_parser.add_argument("--force", action="store_true", help="Skip confirmation prompt when entry_id is provided.")
 
     return parser
 
@@ -148,14 +157,21 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
     if args.command == "automate":
         cmd = getattr(args, "automate_command", None)
         if cmd == "add":
-            return cmd_add(client)
+            return cmd_add(client, install=getattr(args, "install", False), raw=getattr(args, "raw", False))
         if cmd == "cron-login":
             return {"status": "success"}
         if cmd == "list":
             result = cmd_list()
-            return result
+            if getattr(args, "list_as_json", False) or args.as_json:
+                return result
+            if getattr(args, "raw", False):
+                return result.get("cron_lines", "")
+            if result.get("entries"):
+                return result["entries"]
+            print("No booking entries in crontab.")
+            return {"status": "empty"}
         if cmd == "remove":
-            return cmd_remove()
+            return cmd_remove(entry_id=getattr(args, "entry_id", None), force=getattr(args, "force", False))
         raise VAError("Unknown automate subcommand.")
     raise VAError("Unknown command.")
 
@@ -379,6 +395,11 @@ def _render_table(rows: list[dict[str, Any]]) -> str:
 def _table_columns(rows: list[dict[str, Any]]) -> list[str]:
     preferred = [
         "id",
+        "club",
+        "course",
+        "day",
+        "time",
+        "title",
         "title",
         "date",
         "start_time",

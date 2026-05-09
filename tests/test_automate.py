@@ -563,11 +563,15 @@ class CmdRemoveTests(unittest.TestCase):
         self.assertEqual(len(written), 1)
         self.assertNotIn("abc12345", written[0])
 
-    def test_not_found_raises(self) -> None:
+    def test_not_found_returns_false(self) -> None:
         with patch("va_cli.automate._read_crontab", return_value="00 00 * * * echo hello"):
-            with self.assertRaises(VAError) as exc:
-                _do_remove("nonexistent")
-        self.assertIn("nonexistent", str(exc.exception))
+            result = _do_remove("nonexistent")
+        self.assertFalse(result)
+
+    def test_empty_crontab_returns_false(self) -> None:
+        with patch("va_cli.automate._read_crontab", return_value=""):
+            result = _do_remove("nonexistent")
+        self.assertFalse(result)
 
 
 if __name__ == "__main__":
