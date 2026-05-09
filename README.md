@@ -21,12 +21,12 @@ The project talks directly to the Virgin Active Italy web endpoints used by the 
 
 ### `va automate` — recurring booking automation
 
-- interactive class selection (club, course, day of week, time)
-- automatic crontab scheduling (login 5 min before, book at opening, both 48 h before class)
+- interactive `va automate add` to discover classes and print copy-paste cron entries
+- `va book --recurring` self-contained command: resolves class by filters, books with retry
+- pre-login cron entry 5 min before for fast booking
 - per-class retry logic with configurable max attempts and interval
 - session recovery on expiry during cron runs
 - Telegram push notifications on booking success or failure
-- configuration via `.va_state/automate.yaml`
 
 ## Important Disclaimer
 
@@ -108,11 +108,12 @@ The shared runtime uses these environment variables.
 | --- | --- | --- |
 | `VA_STATE_DIR` | `.va_state` in the current working directory | Directory used to store local runtime state such as sessions. |
 
-Session file:
+Files stored in `<VA_STATE_DIR>`:
 
-```text
-<VA_STATE_DIR>/session.json
-```
+| File | Purpose |
+| --- | --- |
+| `session.json` | Persisted authentication cookies |
+| `automate.log` | Runtime log for recurring booking attempts |
 
 ### HTTP Endpoints
 
@@ -238,9 +239,9 @@ venv/bin/va debug dates --club "Roma EUR"
 
 ### Automate — Recurring Booking
 
-The `automate` subcommand lets you configure recurring class bookings that run automatically via cron.
+The `automate` subcommand helps you generate cron entries for recurring class bookings. No config file is written — the cron line **is** the configuration.
 
-**Add a recurring class (interactive):**
+**Generate cron entries (interactive):**
 
 ```bash
 venv/bin/va automate add
@@ -254,70 +255,60 @@ This walks you through selecting:
 4. Specific class (shown for the nearest matching date)
 5. Retry settings (max retries, interval in seconds — default 10 retries, 60 s)
 
-At the end it shows the computed cron schedule and offers to install crontab entries.
+At the end it prints two cron lines for you to copy into `crontab -e`. Example for a Monday 18:00 Yoga class:
 
-**Manage configured classes:**
-
-```bash
-venv/bin/va automate list                  # show all recurring classes + cron times
-venv/bin/va automate remove <class_id>     # remove a class from config
+```
+# Roma EUR — Yoga Calm — Monday 18:00
+55 17 * * 5  va login
+00 18 * * 6  va book --recurring --club 'Roma EUR' --course 'Yoga Calm' --day 0 --time '18:00' --retry 10 --retry-interval 60
 ```
 
-**Crontab management:**
+The login line runs 5 minutes before the booking line (both 48 h before class, on the preceding day), so the session is fresh.
+
+**`va book --recurring`** is a self-contained command that:
+
+1. Auto-logs in if no valid session exists (uses `.env` or keyring credentials)
+2. Searches the API for a class matching `--club`, `--course`, `--day`, `--time` on the correct date
+3. Books the found class by resolved token
+4. On failure: sleeps `--retry-interval` seconds, retries up to `--retry` times
+5. On success or exhaustion: sends Telegram notification (if configured)
 
 ```bash
-venv/bin/va automate schedule              # install or update crontab entries
-venv/bin/va automate unschedule            # remove all automation entries from crontab
+va book --recurring \
+  --club "Roma EUR" \
+  --course "Yoga Calm" \
+  --day 0 \
+  --time "18:00" \
+  --retry 10 \
+  --retry-interval 60
 ```
 
-Each class generates two cron entries:
+| Flag | Required | Meaning |
+| --- | --- | --- |
+| `--recurring` | yes | Switches to filter-based booking |
+| `--club` | yes | Club name |
+| `--course` | no | Course name (optional, matches substring) |
+| `--day` | yes | Day of week: 0=Mon … 6=Sun |
+| `--time` | yes | Class start time HH:MM |
+| `--retry` | no | Max retry attempts (default 10) |
+| `--retry-interval` | no | Seconds between retries (default 60) |
 
-- **Login** — 5 minutes before the booking attempt (fresh session)
-- **Book** — exactly 48 hours before the class starts
-
-Example: a Monday 18:00 class → login Saturday 17:55, book Saturday 18:00.
-
-**Retry behavior:**
-
-The booking worker retries on failure (HTTP error, session expiry, non-200 response). Each retry re-searches for the class and attempts booking. Per-class settings (`max_retries`, `retry_interval`) control how long it keeps trying. All attempts are logged to `.va_state/automate.log`.
-
-If the session expires mid-retry, the worker re-logs in and tries again.
-
-**Internal cron workers** (called by crontab, not meant for manual use):
+**Helper command** (used by the login cron entry):
 
 ```bash
-venv/bin/va automate cron-login            # performs login, saves session
-venv/bin/va automate cron-book --class <id> # finds class, books with retry loop
+va automate cron-login   # performs login, saves session
 ```
 
 #### Telegram Notifications
 
 When a booking succeeds or all retries are exhausted, the bot can send a push notification to your Telegram chat. See the full setup guide at [`docs/telegram-setup.md`](docs/telegram-setup.md).
 
-Add the `notify` section to `.va_state/automate.yaml`:
+Configure via environment variables:
 
-```yaml
-workdir: /home/user/va-booking-bot
-notify:
-  provider: telegram
-  token: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-  chat_id: "987654321"
-classes:
-  - id: abc123
-    club: "Roma EUR"
-    course: "Yoga Calm"
-    day_of_week: 1
-    time: "18:00"
-    max_retries: 10
-    retry_interval: 60
-```
-
-Keep secrets out of the YAML by using env vars instead:
-
-| Variable | Overwrites |
+| Variable | Meaning |
 | --- | --- |
-| `VA_NOTIFY_TOKEN` | `notify.token` |
-| `VA_NOTIFY_CHAT_ID` | `notify.chat_id` |
+| `VA_NOTIFY_TOKEN` | Telegram Bot API token |
+| `VA_NOTIFY_CHAT_ID` | Your Telegram chat ID |
 
 Notifications are only sent on **booking success** and **fatal booking failure** (all retries exhausted). Transient intermediate retries are silent.
 
@@ -325,11 +316,8 @@ Example messages:
 
 - `✅ Booking confirmed: Roma EUR/Yoga Calm @ 18:00 (attempt 1)`
 - `❌ Booking failed: Roma EUR/Yoga Calm @ 18:00 after 10 attempts`
-- `❌ Login failed: Missing VA_USERNAME or VA_PASSWORD.`
 
-#### Configuration File
-
-All automation config is stored in `.va_state/automate.yaml`. The `workdir` is auto-detected and used by cron entries to `cd` into the correct directory before running `va`.
+All cron booking attempts are also logged to `.va_state/automate.log`.
 
 ### Global Flags
 
@@ -350,6 +338,7 @@ PYTHONPATH=src venv/bin/python -m unittest discover -s tests -v
 Useful files:
 
 - [`docs/agent-handoff.md`](docs/agent-handoff.md): reverse-engineering notes and production quirks
+- [`docs/telegram-setup.md`](docs/telegram-setup.md): Telegram bot setup guide
 - `src/va_cli/`: low-level CLI surface
 - `tests/`: regression tests
 
@@ -359,7 +348,8 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## Notes
 
-- filter labels like club names are translated into the site’s hidden internal values automatically
+- filter labels like club names are translated into the site's hidden internal values automatically
 - the login flow bridges `shop.virginactive.it` and `www.virginactive.it` automatically
 - the public calendar uses infinite scroll; the client follows pagination automatically
 - the bot assumes the booking token resolved during preflight is still valid at booking time
+- `va book --recurring` resolves the booking token at runtime by searching matching filters — no fixed ID needed

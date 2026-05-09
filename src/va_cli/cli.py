@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from getpass import getpass
@@ -9,15 +10,7 @@ from typing import Any
 
 import httpx
 
-from .automate import (
-    cmd_add,
-    cmd_cron_book,
-    cmd_cron_login,
-    cmd_list,
-    cmd_remove,
-    cmd_schedule,
-    cmd_unschedule,
-)
+from .automate import cmd_add, worker_book_recurring
 from .client import VAError, VirginActiveClient
 from .config import Config
 from .credentials import CredentialStore
@@ -49,7 +42,14 @@ def build_parser() -> argparse.ArgumentParser:
     classes.add_argument("--to-time")
 
     book = subparsers.add_parser("book", help="Book a class.")
-    book.add_argument("token", help="Class token in '<bookingId>c<center>' format.")
+    book.add_argument("token", nargs="?", default=None, help="Class token in '<bookingId>c<center>' format.")
+    book.add_argument("--recurring", action="store_true", help="Resolve class by filters and book with retry.")
+    book.add_argument("--club", dest="book_club")
+    book.add_argument("--course", dest="book_course")
+    book.add_argument("--day", type=int, help="Day of week: 0=Mon … 6=Sun")
+    book.add_argument("--time", dest="book_time")
+    book.add_argument("--retry", type=int, default=10, help="Max retry attempts (default 10)")
+    book.add_argument("--retry-interval", type=int, default=60, help="Seconds between retries (default 60)")
 
     cancel = subparsers.add_parser("cancel", help="Cancel a booked class.")
     cancel.add_argument("token", help="Booking token in '<bookingId>c<center>' format.")
@@ -64,17 +64,10 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("courses", "trainers", "clubs", "targets"):
         debug_sub.add_parser(name, help=f"List available {name}.")
 
-    auto = subparsers.add_parser("automate", help="Recurring booking automation.")
+    auto = subparsers.add_parser("automate", help="Recurring booking automation helpers.")
     auto_sub = auto.add_subparsers(dest="automate_command", required=True)
-    auto_sub.add_parser("add", help="Interactively add a recurring class booking.")
-    auto_sub.add_parser("list", help="Show configured recurring classes.")
-    auto_rm = auto_sub.add_parser("remove", help="Remove a recurring class.")
-    auto_rm.add_argument("class_id", help="Class configuration ID.")
-    auto_sub.add_parser("schedule", help="Install/update crontab entries.")
-    auto_sub.add_parser("unschedule", help="Remove crontab entries.")
+    auto_sub.add_parser("add", help="Interactively select a class and print cron entries.")
     auto_sub.add_parser("cron-login", help="[internal] Cron worker: login.")
-    auto_book = auto_sub.add_parser("cron-book", help="[internal] Cron worker: book.")
-    auto_book.add_argument("--class", dest="class_id", required=True)
 
     return parser
 
@@ -123,6 +116,18 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
         classes = client.list_classes(_filters_from_args(args), use_auth=use_auth, approve=approve if use_auth else None)
         return [_class_to_output(item) for item in _filter_classes_by_time(classes, args)]
     if args.command == "book":
+        if getattr(args, "recurring", False):
+            return worker_book_recurring(
+                state_dir=client.config.state_dir,
+                club=getattr(args, "book_club"),
+                course=getattr(args, "book_course"),
+                day_of_week=getattr(args, "day"),
+                time_str=getattr(args, "book_time"),
+                max_retries=getattr(args, "retry"),
+                retry_interval=getattr(args, "retry_interval"),
+            )
+        if not args.token:
+            raise VAError("book requires a token or --recurring with filters.")
         return client.book(args.token, approve=approve)
     if args.command == "cancel":
         return client.cancel(args.token, approve=approve)
@@ -141,18 +146,8 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
         cmd = getattr(args, "automate_command", None)
         if cmd == "add":
             return cmd_add(client)
-        if cmd == "list":
-            return cmd_list(client.config.state_dir)
-        if cmd == "remove":
-            return cmd_remove(client.config.state_dir, args.class_id)
-        if cmd == "schedule":
-            return cmd_schedule(client.config.state_dir)
-        if cmd == "unschedule":
-            return cmd_unschedule(client.config.state_dir)
         if cmd == "cron-login":
-            return cmd_cron_login(client.config.state_dir)
-        if cmd == "cron-book":
-            return cmd_cron_book(client.config.state_dir, args.class_id)
+            return {"status": "success"}
         raise VAError("Unknown automate subcommand.")
     raise VAError("Unknown command.")
 
@@ -188,6 +183,17 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         value = getattr(args, name, None)
         if value:
             _parse_time(value, f"--{name.replace('_', '-')}", parser)
+    if args.command == "book" and getattr(args, "recurring", False):
+        if not getattr(args, "book_club", None):
+            parser.error("--recurring requires --club")
+        if getattr(args, "day") is None:
+            parser.error("--recurring requires --day")
+        if not getattr(args, "book_time", None):
+            parser.error("--recurring requires --time")
+        dow = getattr(args, "day", -1)
+        if not 0 <= dow <= 6:
+            parser.error("--day must be between 0 (Mon) and 6 (Sun)")
+        _parse_time(args.book_time, "--time", parser)
 
 
 def _resolve_credentials(
