@@ -28,35 +28,6 @@ class SessionState:
 
 
 @dataclass(slots=True)
-class ClassSummary:
-    class_id: str
-    title: str
-    club: str | None = None
-    start_time: str | None = None
-    end_time: str | None = None
-    instructor: str | None = None
-    available: bool | None = None
-    raw: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(slots=True)
-class BookingSummary:
-    booking_id: str
-    class_id: str | None = None
-    title: str | None = None
-    club: str | None = None
-    start_time: str | None = None
-    cancellable: bool | None = None
-    raw: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(slots=True)
 class FilterOption:
     label: str
     value: str

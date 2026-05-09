@@ -212,6 +212,115 @@ class CliTests(unittest.TestCase):
             cli.main(["--dangerously-approve-token", "book", "208239c232"])
         self.assertEqual(exc.exception.code, 2)
 
+    @patch("va_cli.cli.CredentialStore")
+    @patch("va_cli.cli.VirginActiveClient", FakeClient)
+    def test_classes_json_no_null_values(self, store_cls) -> None:
+        """JSON output must not contain null values."""
+        import json as _json
+        store_cls.return_value.load.return_value = None
+        stdout = io.StringIO()
+        with patch("builtins.input", return_value="y"):
+            with redirect_stdout(stdout):
+                cli.main(["--json", "classes", "--club", "Roma Via Mantova", "--date", "2026-03-13"])
+        data = _json.loads(stdout.getvalue())
+        for item in data:
+            for key, value in item.items():
+                self.assertIsNotNone(value, f"{key} is null in JSON output")
+
+    @patch("va_cli.cli.CredentialStore")
+    @patch("va_cli.cli.VirginActiveClient", FakeClient)
+    def test_classes_json_includes_booking_fields(self, store_cls) -> None:
+        """JSON output must include booking_id and booking_center."""
+        import json as _json
+        store_cls.return_value.load.return_value = None
+        stdout = io.StringIO()
+        with patch("builtins.input", return_value="y"):
+            with redirect_stdout(stdout):
+                cli.main(["--json", "classes", "--date", "2026-03-13"])
+        data = _json.loads(stdout.getvalue())
+        first = data[0]
+        self.assertIn("booking_id", first)
+        self.assertIn("booking_center", first)
+        self.assertEqual(first["booking_id"], "208239")
+        self.assertEqual(first["booking_center"], "232")
+
+    @patch("va_cli.cli.CredentialStore")
+    @patch("va_cli.cli.VirginActiveClient", FakeClient)
+    def test_classes_json_includes_button_label(self, store_cls) -> None:
+        """JSON output must include button_label when available."""
+        import json as _json
+        store_cls.return_value.load.return_value = None
+        stdout = io.StringIO()
+        with patch("builtins.input", return_value="y"):
+            with redirect_stdout(stdout):
+                cli.main(["--json", "classes", "--date", "2026-03-13"])
+        data = _json.loads(stdout.getvalue())
+        labels = [item.get("button_label") for item in data if item.get("button_label")]
+        self.assertIn("Prenota", labels)
+        self.assertIn("15 utenti in attesa", labels)
+
+    @patch("va_cli.cli.CredentialStore")
+    @patch("va_cli.cli.VirginActiveClient", FakeClient)
+    def test_classes_json_snake_case_keys(self, store_cls) -> None:
+        """JSON keys must all be lowercase (no camelCase or PascalCase)."""
+        import json as _json
+        store_cls.return_value.load.return_value = None
+        stdout = io.StringIO()
+        with patch("builtins.input", return_value="y"):
+            with redirect_stdout(stdout):
+                cli.main(["--json", "classes", "--date", "2026-03-13"])
+        data = _json.loads(stdout.getvalue())
+        for item in data:
+            for key in item.keys():
+                self.assertEqual(
+                    key,
+                    key.lower(),
+                    f"Key '{key}' is not lowercase",
+                )
+
+    @patch("va_cli.cli.CredentialStore")
+    def test_json_ready_strips_nulls(self, store_cls) -> None:
+        """_json_ready must strip None values from dicts."""
+        store_cls.return_value.load.return_value = None
+        result = cli._json_ready({"a": 1, "b": None, "c": "ok"})
+        self.assertNotIn("b", result)
+        self.assertEqual(result["a"], 1)
+
+    @patch("va_cli.cli.CredentialStore")
+    def test_json_ready_normalizes_camel_case_keys(self, store_cls) -> None:
+        """_json_ready must convert CamelCase keys to snake_case."""
+        store_cls.return_value.load.return_value = None
+        result = cli._json_ready({"IsLoggedIn": True, "DisplayName": "Anita"})
+        self.assertIn("is_logged_in", result)
+        self.assertIn("display_name", result)
+        self.assertNotIn("IsLoggedIn", result)
+        self.assertNotIn("DisplayName", result)
+
+    @patch("va_cli.cli.CredentialStore")
+    def test_json_ready_recurses_into_lists_and_dicts(self, store_cls) -> None:
+        """_json_ready must recurse into nested structures."""
+        store_cls.return_value.load.return_value = None
+        result = cli._json_ready({"Data": [{"NestedKey": 1, "Skip": None}]})
+        self.assertEqual(result["data"][0]["nested_key"], 1)
+        self.assertNotIn("skip", result["data"][0])
+
+    @patch("va_cli.cli.CredentialStore")
+    @patch("va_cli.cli.VirginActiveClient")
+    def test_json_ready_dataclass_conversion(self, client_cls, store_cls) -> None:
+        """_json_ready must convert dataclasses via asdict."""
+        store_cls.return_value.load.return_value = None
+        store_cls.return_value.load.return_value = None
+        from dataclasses import dataclass
+
+        @dataclass
+        class Point:
+            x: int
+            y: int | None
+
+        result = cli._json_ready(Point(x=10, y=None))
+        self.assertEqual(result["x"], 10)
+        self.assertNotIn("y", result)
+
 
 if __name__ == "__main__":
     unittest.main()

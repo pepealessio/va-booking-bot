@@ -31,6 +31,8 @@ class Config:
     integration_base_url: str
     state_dir: Path
     timeout_seconds: float
+    queue_full_threshold: int
+    booking_open_hours: int
 
     @property
     def session_path(self) -> Path:
@@ -48,6 +50,8 @@ class Config:
             integration_base_url=self.integration_base_url,
             state_dir=self.state_dir,
             timeout_seconds=self.timeout_seconds,
+            queue_full_threshold=self.queue_full_threshold,
+            booking_open_hours=self.booking_open_hours,
         )
 
     @classmethod
@@ -83,4 +87,6 @@ class Config:
             ),
             state_dir=state_dir,
             timeout_seconds=float(os.getenv("VA_TIMEOUT_SECONDS", "20")),
+            queue_full_threshold=int(os.getenv("VA_QUEUE_FULL_THRESHOLD", "15")),
+            booking_open_hours=int(os.getenv("VA_BOOKING_OPEN_HOURS", "48")),
         )

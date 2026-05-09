@@ -15,13 +15,15 @@ The CLI implements four distinct capabilities:
 
 The current implementation lives mainly in:
 
-- [src/va_cli/client.py](/home/alessiopepe/projects/va-book-bot/src/va_cli/client.py)
-- [src/va_cli/calendar_parser.py](/home/alessiopepe/projects/va-book-bot/src/va_cli/calendar_parser.py)
-- [src/va_cli/cli.py](/home/alessiopepe/projects/va-book-bot/src/va_cli/cli.py)
-- [src/va_cli/config.py](/home/alessiopepe/projects/va-book-bot/src/va_cli/config.py)
-- [src/va_cli/credentials.py](/home/alessiopepe/projects/va-book-bot/src/va_cli/credentials.py)
-- [src/va_cli/session.py](/home/alessiopepe/projects/va-book-bot/src/va_cli/session.py)
-- [tests/test_client.py](/home/alessiopepe/projects/va-book-bot/tests/test_client.py)
+- [src/va_cli/client.py](src/va_cli/client.py)
+- [src/va_cli/calendar_parser.py](src/va_cli/calendar_parser.py)
+- [src/va_cli/cli.py](src/va_cli/cli.py)
+- [src/va_cli/config.py](src/va_cli/config.py)
+- [src/va_cli/credentials.py](src/va_cli/credentials.py)
+- [src/va_cli/session.py](src/va_cli/session.py)
+- [src/va_cli/models.py](src/va_cli/models.py)
+- [tests/test_client.py](tests/test_client.py)
+- [tests/test_cli.py](tests/test_cli.py)
 
 ## High-Level Architecture
 
@@ -49,7 +51,7 @@ Credential precedence in the current CLI is:
 
 ## Config
 
-Defined in [src/va_cli/config.py](/home/alessiopepe/projects/va-book-bot/src/va_cli/config.py).
+Defined in [src/va_cli/config.py](src/va_cli/config.py).
 
 Important environment variables:
 
@@ -63,6 +65,8 @@ Important environment variables:
 - `VA_CALENDAR_FILTER_URL`
 - `VA_INTEGRATION_BASE_URL`
 - `VA_TIMEOUT_SECONDS`
+- `VA_QUEUE_FULL_THRESHOLD` (default 15)
+- `VA_BOOKING_OPEN_HOURS` (default 48)
 
 Defaults point at the production Italy site:
 
@@ -235,7 +239,7 @@ If another agent removes this loop, `va classes` will truncate at 5 results.
 
 ## HTML Parsing Details
 
-Implemented in [src/va_cli/calendar_parser.py](/home/alessiopepe/projects/va-book-bot/src/va_cli/calendar_parser.py).
+Implemented in [src/va_cli/calendar_parser.py](src/va_cli/calendar_parser.py).
 
 ### `CalendarPageParser`
 
@@ -362,11 +366,15 @@ The CLI now normalizes these labels into a stable public status field:
 
 - `bookable`
 - `full`
+- `not_yet_open`
 - `queue`
+- `overbooked`
 - `queue_full`
 - `unavailable`
 
-Current mapping:
+### Base status from button label
+
+The parser in `CalendarClassParser` assigns an initial status from `button_label`:
 
 - labels containing `Prenota` -> `bookable`
 - labels containing sold-out markers such as `Prenotazioni non disponibili` -> `full`
@@ -379,6 +387,20 @@ When the rendered button includes numeric counts, the parser also extracts:
 
 - `queue_length` from labels like `15 utenti in attesa`
 - `available_places` from labels like `3 posti disponibili`
+
+### Context-aware status remapping
+
+After every JFilter page is parsed, `VirginActiveClient._remap_statuses()` applies two overrides based on config:
+
+**Overbooked** (`VA_QUEUE_FULL_THRESHOLD`, default 15):
+- A class with base status `queue` and `queue_length >= threshold` is remapped to `overbooked`.
+- This indicates a waitlist that is too long to be practically useful.
+
+**Not yet open** (`VA_BOOKING_OPEN_HOURS`, default 48):
+- A class with base status `full` whose start datetime is more than `booking_open_hours` in the future is remapped to `not_yet_open`.
+- This disambiguates distant classes where the booking window hasn't opened yet from genuinely sold-out classes. `va book` on a `not_yet_open` class will fail with `ListsFullException`.
+
+These overrides are applied after parsing, not in the parser itself, because they need access to config values and current time. The parser-level base statuses remain unchanged for testability.
 
 ### Live Authenticated Findings
 
@@ -609,16 +631,17 @@ The fastest smoke tests are:
 3. `va debug clubs`
 4. `va classes --club "Roma EUR" --date YYYY-MM-DD`
 5. `va classes --club "Roma EUR" --date YYYY-MM-DD` with saved session approval
+6. `va --json classes ...` to verify JSON output structure
 
-`Roma EUR` is a useful regression case because it previously exposed the `onclick` token bug.
+`Roma EUR` is a useful regression case because it previously exposed the `onclick` token bug and now exercises both `not_yet_open` and `overbooked` status remapping with distant and high-queue classes.
 
 ## Test Coverage
 
-Regression tests currently cover:
+Regression tests cover:
 
 - login + CSRF + session persistence
 - SSO bridge to `www`
-- filter parsing
+- filter parsing (UUID values, zero-padded dates, real calendar page)
 - date parsing
 - public class card parsing
 - authenticated button-id parsing
@@ -627,14 +650,26 @@ Regression tests currently cover:
 - authenticated list flow establishing the `www` session
 - `--no-auth` forcing public listing
 - booking token split and approval behavior
+- status remapping: `overbooked` at queue threshold, `not_yet_open` beyond booking window, other statuses unchanged
+- JSON output: null stripping, CamelCase → snake_case key normalization, new fields (`booking_id`, `booking_center`, `button_label`, `duration`)
+- table: all fixtures parse with valid tokens, column ordering
+
+The test suite loads real production HTML fixtures from `tests/fixtures/` (downloaded calendar page, login page, subscriptions page, and multiple JFilter responses).
 
 Run:
 
 ```bash
-PYTHONPATH=src venv/bin/python -m unittest discover -s tests -v
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 ```
 
-## Safe Extension Points
+## JSON Output
+
+The `--json` flag produces machine-readable output with these guarantees:
+
+- All dict keys are snake_case. CamelCase keys from server responses (e.g. `IsLoggedIn`, `StatusMessage`) are normalized (`is_logged_in`, `status_message`).
+- No `null` values. Optional fields are omitted when empty, not included as `null`.
+- `classes --json` includes `booking_id`, `booking_center`, `token` (composite), `duration`, and `button_label` for automation scripting.
+- `debug whoami --json` normalizes keys from `IsLoggedIn`/`DisplayName`/`AvatarImageUrl` to snake_case.
 
 If another agent needs to extend the project, the least risky places are:
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime, timedelta
 from html import unescape
 from urllib.parse import quote_plus
 from collections.abc import Callable
@@ -281,6 +282,7 @@ class VirginActiveClient:
             raise VAError("Unexpected calendar payload; expected class_calendar HTML.")
         parser = CalendarClassParser(selected_date=selected_date)
         parser.feed(calendar_html)
+        self._remap_statuses(parser.classes)
         return {"classes": parser.classes, "dates": parser.date_options}
 
     def _resolve_filter_values(self, filters: dict[str, str | None]) -> dict[str, str | None]:
@@ -393,6 +395,31 @@ class VirginActiveClient:
             "Ho dimenticato la password",
         )
         return any(marker in html for marker in markers)
+
+    def _remap_statuses(self, classes: list[CalendarClass]) -> None:
+        """Apply context-aware status overrides based on config thresholds and class timing.
+
+        1. Overbooked: queue classes with queue_length >= threshold become 'overbooked'.
+        2. Not yet open: 'full' classes whose booking window hasn't opened yet become 'not_yet_open'.
+        """
+        threshold = self.config.queue_full_threshold
+        open_hours = self.config.booking_open_hours
+        cutoff = datetime.now(UTC) + timedelta(hours=open_hours)
+
+        for cls in classes:
+            # High queue → overbooked
+            if cls.status == "queue" and cls.queue_length is not None and cls.queue_length >= threshold:
+                cls.status = "overbooked"
+
+            # Full but booking not yet open → not_yet_open
+            if cls.status == "full" and cls.date and cls.start_time:
+                try:
+                    dt_str = f"{cls.date} {cls.start_time}"
+                    class_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M").replace(tzinfo=UTC)
+                    if class_dt > cutoff:
+                        cls.status = "not_yet_open"
+                except ValueError:
+                    continue
 
     def _require_url(self, value: str | None, env_name: str) -> str:
         if not value:

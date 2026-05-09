@@ -1,0 +1,484 @@
+
+
+
+<script src="/Mvc/Views/TagLeadForm/ics.min.js" type="text/javascript"></script>
+<script src="/Mvc/Views/TagLeadForm/ics.deps.min.js" type="text/javascript"></script>
+
+
+
+<div class="modal fade" id="late" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content modalCalendar">
+            <div class="modal-body benefit-popup">
+                <div class="container-fluid">
+                    <div class="row">
+                        <div>
+                            <h4>La prenotazione per un corso &egrave; ammissibile solo un'ora prima dell'inizio.</h4>
+                        </div>
+                    </div>
+                </div>
+            </div><div class="modal-footer">
+                <button type="button" class="btn btn-bordered-black" data-bs-dismiss="modal">Chiudi</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="soon" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content modalCalendar">
+            <div class="modal-body benefit-popup">
+                <div class="container-fluid">
+                    <div class="row">
+                        <div>
+                            <h6>Al momento non &egrave; possibile prenotare questa lezione.</h6>
+                            <h4>Riprova piu' tardi.</h4>
+                        </div>
+                    </div>
+                </div>
+            </div><div class="modal-footer">
+                <button type="button" class="btn btn-bordered-black" data-bs-dismiss="modal">Chiudi</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="noInfo" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content modalCalendar">
+            <div class="modal-body benefit-popup">
+                <div class="container-fluid">
+                    <div class="row">
+                        <div>
+                            <h4>Non ci sono ancora informazioni in merito alla classe interessata.</h4>
+                        </div>
+                    </div>
+                </div>
+            </div><div class="modal-footer">
+                <button type="button" class="btn btn-bordered-black" data-bs-dismiss="modal">Chiudi</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="overlap" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content modalCalendar">
+            <div class="modal-body benefit-popup">
+                <div class="container-fluid">
+                    <div class="row">
+                        <div>
+                            <h6>Sei gi&agrave; iscritto ad un'altra classe nella stessa ora.</h6>
+                            <h4>Continuare con la prenotazone?</h4>
+                        </div>
+                    </div>
+                </div>
+            </div><div class="modal-footer">
+                <button type="button" class="btn btn-bordered-black" data-bs-dismiss="modal">Annulla</button>
+
+                <button type="button" class="btn btn-red" id="overlap-book-button">
+                    Prenota
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalError" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content modalCalendar">
+            <div class="modal-body benefit-popup">
+                <div class="container-fluid">
+                    <div class="row">
+                        <div>
+                            <h4>Errore nella prenotazione</h4>
+                            <h6 id="errorValue">Continuare con la prenotazone?</h6>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-bordered-black" data-bs-dismiss="modal">Chiudi</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="notBookable" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content modalCalendar">
+            <div class="modal-body benefit-popup">
+                <div class="container-fluid">
+                    <div class="row">
+                        <div>
+                            <h4>Priorit&agrave; esaurita.</h4>
+                            <h6>I posti per la prenotazione anticipata sono terminati. Attendi le prossime disponibilit&agrave;.</h6>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-bordered-black" data-bs-dismiss="modal">Chiudi</button>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="full" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content modalCalendar">
+            <div class="modal-body benefit-popup">
+                <div class="container-fluid">
+                    <div class="row">
+                        <div>
+                            <h4>Il corso &egrave; completo.</h4>
+                            <h6>Approfittane per scoprire uno dei nostri corsi a cui non hai ancora partecipato.</h6>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-bordered-black" data-bs-dismiss="modal">Chiudi</button>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="accessDenied" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content modalCalendar">
+            <div class="modal-body benefit-popup">
+                <div class="container-fluid">
+                    <div class="row">
+                        <div>
+                            <h4>Il Club non &egrave; incluso nel tuo abbonamento.</h4>
+                            <h6>
+                                Il corso che vuoi prenotare si svolge in un club che non � compreso nel tuo abbonamento, utilizza i filtri per cercare la disponibilit� presso il tuo club di riferimento o i club che frequenti.
+                            </h6>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-bordered-black" data-bs-dismiss="modal">Chiudi</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+<div class="calendar">
+    <div class="calendarDays">
+            <div class="calendarDay changeDay " data-param="day_selected" data-day="2026-05-09">
+                <span>SABATO</span>
+                <span class="dayNumber">09</span>
+            </div>
+            <div class="calendarDay changeDay " data-param="day_selected" data-day="2026-05-10">
+                <span>DOMENICA</span>
+                <span class="dayNumber">10</span>
+            </div>
+            <div class="calendarDay changeDay " data-param="day_selected" data-day="2026-05-11">
+                <span>LUNED&#204;</span>
+                <span class="dayNumber">11</span>
+            </div>
+            <div class="calendarDay changeDay selected" data-param="day_selected" data-day="2026-05-12">
+                <span>MARTED&#204;</span>
+                <span class="dayNumber">12</span>
+            </div>
+            <div class="calendarDay changeDay " data-param="day_selected" data-day="2026-05-13">
+                <span>MERCOLED&#204;</span>
+                <span class="dayNumber">13</span>
+            </div>
+            <div class="calendarDay changeDay " data-param="day_selected" data-day="2026-05-14">
+                <span>GIOVED&#204;</span>
+                <span class="dayNumber">14</span>
+            </div>
+            <div class="calendarDay changeDay " data-param="day_selected" data-day="2026-05-15">
+                <span>VENERD&#204;</span>
+                <span class="dayNumber">15</span>
+            </div>
+            <div class="calendarDay changeDay " data-param="day_selected" data-day="2026-05-16">
+                <span>SABATO</span>
+                <span class="dayNumber">16</span>
+            </div>
+    </div>
+
+    <div class="container">
+
+        <div class="dayNow"><strong>12</strong> MAGGIO</div>
+
+        <input type="hidden" name="current-day" value="12" />
+        <input type="hidden" name="current-month" value="MAGGIO" />
+        <input type="hidden" name="current-page" value="0" />
+
+        <div class="classLines">
+                <div class="calendarLesson classLine">
+                    <div class="calendarLessonImage">
+                            <img src="https://vai-sitefinity-cdn-prod-gda8g2ekg2g9buf9.z01.azurefd.net/images/default-source/activities/functional/functional-liftclub.jpg?sfvrsn=25309f4c_1" alt="Lift Club" />
+                    </div>
+                    <div class="calendarLessonOrario flex-grow-1">
+                        <strong>07:15</strong> 08:00
+                        <br />
+                            45 min.
+                    </div>
+                    <div class="calendaClassName flex-grow-1">
+                        <strong>Lift Club</strong>
+                        <div class="calendaClassMobileDet">
+                            Giorgia Facchini
+                            <div>
+                                <strong>Roma EUR</strong>
+                                <br />
+                                <span class="fw300">Lift Area</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="calendarLessonTrainer">
+                        <!--
+                            <div class="calendarLessonImage">
+                                    <img src="https://vai-sitefinity-cdn-prod-gda8g2ekg2g9buf9.z01.azurefd.net/images/default-source/trainers/36876796-c591-4f6e-9443-e63a8ab55129_web-jpg.jpg?sfvrsn=ade21b3f_2" />
+                                    <br />
+                            </div>
+                        -->
+                        Giorgia Facchini
+                    </div>
+                    <div class="calendarLessonClub flex-grow-1">
+                        Roma EUR
+                        <br />
+                        <span class="fw300">Lift Area</span>
+                    </div>
+                    <div class="calendarButton">
+                                <button href="#"
+                                        class="btn btn-bordered-grey btn-info-icon btn-not-book" data-bs-toggle="modal" data-bs-target="#notBookable" id="352306c220">
+                                    <span></span>Prenotazioni non disponibili
+                                </button>
+                    </div>
+                </div>
+                <div class="calendarLesson classLine">
+                    <div class="calendarLessonImage">
+                            <img src="https://vai-sitefinity-cdn-prod-gda8g2ekg2g9buf9.z01.azurefd.net/images/default-source/activities/strength/barre-plus-main.jpg?sfvrsn=f4e71fc8_2" alt="Barre+" />
+                    </div>
+                    <div class="calendarLessonOrario flex-grow-1">
+                        <strong>07:15</strong> 08:00
+                        <br />
+                            45 min.
+                    </div>
+                    <div class="calendaClassName flex-grow-1">
+                        <strong>Barre+</strong>
+                        <div class="calendaClassMobileDet">
+                            Alessia Antonucci
+                            <div>
+                                <strong>Roma EUR</strong>
+                                <br />
+                                <span class="fw300">Studio Active</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="calendarLessonTrainer">
+                        <!--
+                            <div class="calendarLessonImage">
+                                    <img src="https://vai-sitefinity-cdn-prod-gda8g2ekg2g9buf9.z01.azurefd.net/images/default-source/trainers/48b0894a-bff6-4f16-b57e-36b7de5dafff_web-jpg.jpg?sfvrsn=529705b0_2" />
+                                    <br />
+                            </div>
+                        -->
+                        Alessia Antonucci
+                    </div>
+                    <div class="calendarLessonClub flex-grow-1">
+                        Roma EUR
+                        <br />
+                        <span class="fw300">Studio Active</span>
+                    </div>
+                    <div class="calendarButton">
+                                <button href="#"
+                                        class="btn btn-bordered-grey btn-info-icon btn-not-book" data-bs-toggle="modal" data-bs-target="#notBookable" id="351982c220">
+                                    <span></span>Prenotazioni non disponibili
+                                </button>
+                    </div>
+                </div>
+                <div class="calendarLesson classLine">
+                    <div class="calendarLessonImage">
+                            <img src="https://vai-sitefinity-cdn-prod-gda8g2ekg2g9buf9.z01.azurefd.net/images/default-source/activities/cycle/cycle-burn-main.jpg?sfvrsn=95c3ece_2" alt="Cycle Burn" />
+                    </div>
+                    <div class="calendarLessonOrario flex-grow-1">
+                        <strong>07:30</strong> 08:30
+                        <br />
+                            60 min.
+                    </div>
+                    <div class="calendaClassName flex-grow-1">
+                        <strong>Cycle Burn</strong>
+                        <div class="calendaClassMobileDet">
+                            Patrizia Ceci
+                            <div>
+                                <strong>Roma EUR</strong>
+                                <br />
+                                <span class="fw300">Studio Cycle</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="calendarLessonTrainer">
+                        <!--
+                            <div class="calendarLessonImage">
+                                    <img src="https://vai-sitefinity-cdn-prod-gda8g2ekg2g9buf9.z01.azurefd.net/images/default-source/trainers/8fca6e5d-82a2-4d20-acee-8ed4bdf899fb_web-jpg.jpg?sfvrsn=2034fc0c_2" />
+                                    <br />
+                            </div>
+                        -->
+                        Patrizia Ceci
+                    </div>
+                    <div class="calendarLessonClub flex-grow-1">
+                        Roma EUR
+                        <br />
+                        <span class="fw300">Studio Cycle</span>
+                    </div>
+                    <div class="calendarButton">
+                                <button href="#"
+                                        class="btn btn-bordered-grey btn-info-icon btn-not-book" data-bs-toggle="modal" data-bs-target="#notBookable" id="352117c220">
+                                    <span></span>Prenotazioni non disponibili
+                                </button>
+                    </div>
+                </div>
+                <div class="calendarLesson classLine">
+                    <div class="calendarLessonImage">
+                            <img src="https://vai-sitefinity-cdn-prod-gda8g2ekg2g9buf9.z01.azurefd.net/images/default-source/activities/water/water-hydrobike-main.jpg?sfvrsn=b5ea5822_2" alt="Water Hydrobike" />
+                    </div>
+                    <div class="calendarLessonOrario flex-grow-1">
+                        <strong>08:15</strong> 09:00
+                        <br />
+                            45 min.
+                    </div>
+                    <div class="calendaClassName flex-grow-1">
+                        <strong>Water Hydrobike</strong>
+                        <div class="calendaClassMobileDet">
+                            Francesca Ponziani
+                            <div>
+                                <strong>Roma EUR</strong>
+                                <br />
+                                <span class="fw300">Piscina</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="calendarLessonTrainer">
+                        <!--
+                            <div class="calendarLessonImage">
+                                    <img src="https://vai-sitefinity-cdn-prod-gda8g2ekg2g9buf9.z01.azurefd.net/images/default-source/trainers/e62fabf6-0268-4440-9f24-a68b12766cc8_web-jpg.jpg?sfvrsn=d0f3f109_2" />
+                                    <br />
+                            </div>
+                        -->
+                        Francesca Ponziani
+                    </div>
+                    <div class="calendarLessonClub flex-grow-1">
+                        Roma EUR
+                        <br />
+                        <span class="fw300">Piscina</span>
+                    </div>
+                    <div class="calendarButton">
+                                <button href="#"
+                                        class="btn btn-bordered-grey btn-info-icon btn-not-book" data-bs-toggle="modal" data-bs-target="#notBookable" id="352333c220">
+                                    <span></span>Prenotazioni non disponibili
+                                </button>
+                    </div>
+                </div>
+                <div class="calendarLesson classLine">
+                    <div class="calendarLessonImage">
+                            <img src="https://vai-sitefinity-cdn-prod-gda8g2ekg2g9buf9.z01.azurefd.net/images/default-source/activities/group-reformer-pilates-athletic-01.jpg?sfvrsn=6b79b60c_2" alt="Reformer Pilates Athletic" />
+                    </div>
+                    <div class="calendarLessonOrario flex-grow-1">
+                        <strong>08:15</strong> 09:00
+                        <br />
+                            45 min.
+                    </div>
+                    <div class="calendaClassName flex-grow-1">
+                        <strong>Reformer Pilates Athletic</strong>
+                        <div class="calendaClassMobileDet">
+                            Alessia Antonucci
+                            <div>
+                                <strong>Roma EUR</strong>
+                                <br />
+                                <span class="fw300">Studio Reformer Pilates</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="calendarLessonTrainer">
+                        <!--
+                            <div class="calendarLessonImage">
+                                    <img src="https://vai-sitefinity-cdn-prod-gda8g2ekg2g9buf9.z01.azurefd.net/images/default-source/trainers/48b0894a-bff6-4f16-b57e-36b7de5dafff_web-jpg.jpg?sfvrsn=529705b0_2" />
+                                    <br />
+                            </div>
+                        -->
+                        Alessia Antonucci
+                    </div>
+                    <div class="calendarLessonClub flex-grow-1">
+                        Roma EUR
+                        <br />
+                        <span class="fw300">Studio Reformer Pilates</span>
+                    </div>
+                    <div class="calendarButton">
+                                <button href="#"
+                                        class="btn btn-bordered-grey btn-info-icon btn-not-book" data-bs-toggle="modal" data-bs-target="#notBookable" id="351739c220">
+                                    <span></span>Prenotazioni non disponibili
+                                </button>
+                    </div>
+                </div>
+
+        </div>
+    </div>
+</div>
+
+<style>
+
+    .benefit-popup {
+        background: #fff;
+        padding: 30px 20px 0;
+        width: 50vw;
+        margin: auto;
+    }
+
+        .benefit-popup h6 {
+            margin-bottom: 5px;
+        }
+
+        .benefit-popup h3 {
+            margin-bottom: 20px;
+        }
+
+    .modal-content.modalCalendar .modal-footer {
+        width: 50vw;
+        margin: auto;
+        background: #fff;
+        border-radius: 0;
+        border: none;
+        padding: 0 30px 30px;
+    }
+
+        .modal-content.modalCalendar .modal-footer .btn {
+            width: 150px;
+        }
+
+    @media only screen and (max-width: 992px) {
+        .benefit-popup {
+            width: 90vw;
+        }
+
+        .modal-content.modalCalendar .modal-footer {
+            width: 90vw;
+        }
+
+            .modal-content.modalCalendar .modal-footer .btn {
+                width: 100px;
+            }
+    }
+</style>
+
+<script>
+    function saveCalendar(club, lesson, date, dateStart, dateEnd) {
+        // console.log(date,dateStart,dateEnd)
+        var eventDate = new Date(date);
+        var eventStartDate = new Date(eventDate);
+        eventStartDate.setHours(dateStart.substring(0,2))
+        eventStartDate.setMinutes(dateStart.substring(3, 5))
+        var eventEndDate = new Date(eventDate);
+        eventEndDate.setHours(dateEnd.substring(0,2))
+        eventEndDate.setMinutes(dateEnd.substring(3, 5))
+        var eventDescription = "Lezione di " + lesson + " nel club di " + club + " dalle " + dateStart
+        const calendarEvent = ics();
+        calendarEvent.addEvent("Virgin Active - Lezione di " + lesson, eventDescription, club, eventStartDate, eventEndDate);
+        calendarEvent.download();
+    }
+</script>

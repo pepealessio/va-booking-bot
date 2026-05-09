@@ -244,12 +244,26 @@ def _parse_time(value: str | None, label: str = "time", parser: argparse.Argumen
 
 def _json_ready(value: Any) -> Any:
     if is_dataclass(value):
-        return asdict(value)
+        return _json_ready(asdict(value))
     if isinstance(value, list):
         return [_json_ready(item) for item in value]
     if isinstance(value, dict):
-        return {key: _json_ready(item) for key, item in value.items()}
+        return {
+            _normalize_key(key): _json_ready(item)
+            for key, item in value.items()
+            if item is not None
+        }
     return value
+
+
+def _normalize_key(key: str) -> str:
+    """Convert CamelCase to snake_case for JSON output."""
+    result = []
+    for i, ch in enumerate(key):
+        if ch.isupper() and i > 0:
+            result.append("_")
+        result.append(ch.lower())
+    return "".join(result)
 
 
 def _format_row(item: Any) -> str:
@@ -273,7 +287,7 @@ def _format_row(item: Any) -> str:
 
 
 def _class_to_output(item: CalendarClass) -> dict[str, Any]:
-    return {
+    result: dict[str, Any] = {
         "id": item.token,
         "title": item.title,
         "date": item.date,
@@ -283,9 +297,14 @@ def _class_to_output(item: CalendarClass) -> dict[str, Any]:
         "trainer": item.trainer,
         "room": item.room,
         "status": item.status,
+        "booking_id": item.booking_id,
+        "booking_center": item.booking_center,
+        "duration": item.duration,
         "queue_length": item.queue_length,
         "available_places": item.available_places,
+        "button_label": item.button_label,
     }
+    return {k: v for k, v in result.items() if v is not None}
 
 
 def _render_table(rows: list[dict[str, Any]]) -> str:
@@ -316,6 +335,12 @@ def _table_columns(rows: list[dict[str, Any]]) -> list[str]:
         "trainer",
         "room",
         "status",
+        "queue_length",
+        "available_places",
+        "booking_id",
+        "booking_center",
+        "duration",
+        "button_label",
         "label",
         "value",
         "weekday",
@@ -341,11 +366,17 @@ def _column_label(column: str) -> str:
         "status": "Status",
         "queue_length": "Queue",
         "available_places": "Places",
+        "booking_id": "Booking ID",
+        "booking_center": "Center",
+        "duration": "Duration",
+        "button_label": "Button",
         "label": "Name",
         "value": "Value",
         "weekday": "Weekday",
         "day_number": "Day",
         "selected": "Selected",
+        "overbooked": "Overbooked",
+        "not_yet_open": "Not Open",
     }
     return labels.get(column, column.replace("_", " ").title())
 

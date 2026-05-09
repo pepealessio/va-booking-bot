@@ -123,6 +123,8 @@ These normally do not need to be changed.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `VA_TIMEOUT_SECONDS` | `20` | HTTP timeout used by the internal clients. |
+| `VA_QUEUE_FULL_THRESHOLD` | `15` | Queue length at or above which a class is marked `overbooked` instead of `queue`. |
+| `VA_BOOKING_OPEN_HOURS` | `48` | Hours before a class that bookings open. Classes older than this window showing `full` are remapped to `not_yet_open`. |
 
 ## `va` Usage
 
@@ -175,16 +177,25 @@ Time filter rules:
 Output:
 
 - plain mode prints a table
-- JSON mode prints machine-readable objects
+- JSON mode prints machine-readable objects with snake_case keys; null fields are omitted
 - class identifiers are the composite token form `<bookingId>c<center>`, for example `355132c220`
+- JSON objects include `booking_id` and `booking_center` as separate fields for automation scripting
+- `debug whoami` JSON keys are converted from CamelCase to snake_case (`IsLoggedIn` → `is_logged_in`)
 
 Status values:
 
-- `bookable`
-- `full`
-- `queue`
-- `queue_full`
-- `unavailable`
+- `bookable` — class can be booked
+- `full` — class is sold out (booking window open)
+- `not_yet_open` — `Prenotazioni non disponibili` displayed but booking window not yet open (>48h before class)
+- `queue` — waitlist position available
+- `overbooked` — queue length meets or exceeds the `VA_QUEUE_FULL_THRESHOLD` (default 15); waitlist is effectively not useful
+- `queue_full` — waitlist is full (e.g. "lista di attesa piena")
+- `unavailable` — any other state (e.g. "Troppo tardi")
+
+Status remapping is applied after parsing:
+
+- A class with `queue` status and `queue_length >= VA_QUEUE_FULL_THRESHOLD` is remapped to `overbooked`.
+- A class with `full` status whose start time is more than `VA_BOOKING_OPEN_HOURS` in the future is remapped to `not_yet_open`. This disambiguates distant classes where the booking window hasn't opened yet from genuinely sold-out classes.
 
 Authenticated behavior:
 
