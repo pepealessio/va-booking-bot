@@ -353,6 +353,11 @@ def interactive_add(
     if raw:
         max_retries_val = 10
         retry_interval_val = 60
+        do_install = False
+    elif install:
+        max_retries_val = 10
+        retry_interval_val = 60
+        do_install = True
     else:
         max_retries_text = questionary.text(
             "Max retries (default 10):",
@@ -368,17 +373,11 @@ def interactive_add(
             raise VAError("Aborted by user")
         retry_interval_val = int(retry_interval_text) if retry_interval_text else 60
 
-    if not raw:
-        cron = compute_cron_times(day_of_week, time_str)
-        cron_preview = (
-            f"\n  Schedule (48h before class, cron DOW):\n"
-            f"  Login: {cron['login_minute']:02d} {cron['login_hour']:02d} * * {cron['login_dow']}\n"
-            f"  Book:  {cron['book_minute']:02d} {cron['book_hour']:02d} * * {cron['book_dow']}"
-        )
-        print(cron_preview)
-
-        confirmed = questionary.confirm("Generate cron entries?").ask()
-        if not confirmed:
+        do_install = questionary.confirm(
+            "Install into crontab?",
+            default=True,
+        ).ask()
+        if do_install is None:
             raise VAError("Aborted by user")
 
     entry_id = _generate_id()
@@ -394,36 +393,29 @@ def interactive_add(
 
     cron_content = "\n".join(lines) + "\n"
 
-    if install:
+    if raw:
+        print(cron_content, end="")
+    elif not do_install:
+        print()
+        print("Copy these lines into your crontab (`crontab -e`):")
+        print()
+        for line in lines:
+            print(f"  {line}")
+        print()
+        print(f"  Listing entries:    va automate list")
+        print(f"  Remove this entry:  va automate remove {entry_id}")
+    else:
         existing = _read_crontab()
         new_content = (existing + "\n" + cron_content) if existing else cron_content
         _write_crontab(new_content)
-        if raw:
-            print(cron_content, end="")
-        else:
-            print()
-            print("Cron entries installed successfully!")
-            print()
-            for line in lines:
-                print(f"  {line}")
-            print()
-            print(f"  Listing entries:    va automate list")
-            print(f"  Remove this entry:  va automate remove {entry_id}")
-    else:
-        if raw:
-            print(cron_content, end="")
-        else:
-            print()
-            print("Copy these lines into your crontab (`crontab -e`):")
-            print()
-            for line in lines:
-                print(f"  {line}")
-            print()
-            print("  Or install directly with:")
-            print(f"    va automate add --install")
-            print()
-            print(f"  Listing entries:    va automate list")
-            print(f"  Remove this entry:  va automate remove {entry_id}")
+        print()
+        print("Cron entries installed successfully!")
+        print()
+        for line in lines:
+            print(f"  {line}")
+        print()
+        print(f"  Listing entries:    va automate list")
+        print(f"  Remove this entry:  va automate remove {entry_id}")
 
     return {
         "status": "success",
