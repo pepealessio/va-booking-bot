@@ -477,9 +477,10 @@ class CronEntryMarkerTests(unittest.TestCase):
         self.assertIn(VA_MARKER_PREFIX + "abc12345", lines[1])
         self.assertIn(VA_MARKER_PREFIX + "abc12345", lines[2])
 
-    def test_marker_not_in_comment(self) -> None:
+    def test_marker_in_comment(self) -> None:
         lines = build_cron_entry("Roma EUR", 0, "18:00", entry_id="abc12345")
-        self.assertNotIn(VA_MARKER_PREFIX, lines[0])
+        self.assertIn(VA_MARKER_PREFIX, lines[0])
+        self.assertIn("abc12345", lines[0])
 
     def test_auto_generates_id_when_none(self) -> None:
         lines = build_cron_entry("Roma EUR", 0, "18:00")

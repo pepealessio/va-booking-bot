@@ -96,7 +96,7 @@ def build_cron_entry(
         cron["book_minute"], cron["book_hour"], cron["book_dow"], va_bin,
         club, course_part, day_of_week, time_str, max_retries, retry_interval, marker,
     )
-    comment = "# %s — %s — %s %s" % (club, course or "any class", DOW_NAMES[day_of_week], time_str)
+    comment = "# %s — %s — %s %s %s" % (club, course or "any class", DOW_NAMES[day_of_week], time_str, marker)
     return [comment, login_line, book_line]
 
 
