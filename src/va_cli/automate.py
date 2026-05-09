@@ -45,7 +45,7 @@ def compute_cron_times(
     book_time = class_time - timedelta(hours=booking_open_hours)
     login_time = book_time - timedelta(minutes=login_offset_minutes)
 
-    cls_date = datetime(2026, 1, 12 + py_dow)  # 2026-01-12 is Monday
+    cls_date = datetime(2026, 1, 12 + py_dow, h, m)  # 2026-01-12 is Monday, with actual time
     book_date = cls_date - timedelta(hours=booking_open_hours)
     login_date = book_date - timedelta(minutes=login_offset_minutes)
 

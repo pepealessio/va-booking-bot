@@ -61,10 +61,10 @@ class CronComputationTests(unittest.TestCase):
         self.assertEqual(cron["book_minute"], 15)
 
     def test_all_dow_wrap_correctly(self) -> None:
-        # Monday → book Saturday, login Friday
+        # Monday → book Saturday, login also Saturday (5min offset can't cross day boundary)
         cron = compute_cron_times(0, "18:00")
-        self.assertEqual(cron["book_dow"], 6)   # Sat
-        self.assertEqual(cron["login_dow"], 5)  # Fri
+        self.assertEqual(cron["book_dow"], 6)    # Sat
+        self.assertEqual(cron["login_dow"], 6)   # Sat (same day as book)
 
     def test_hour_wrap_past_midnight(self) -> None:
         cron = compute_cron_times(0, "02:00")
