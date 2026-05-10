@@ -273,15 +273,15 @@ va automate add --raw | crontab -
 
 `--raw` prints only the cron lines with no commentary, making it pipe-friendly.
 
-At the end it prints two cron lines (unless `--install` or `--raw` is used). Example for a Monday 18:00 Yoga class:
+At the end it prints three cron lines (unless `--install` or `--raw` is used). Example for a Monday 18:00 Yoga class:
 
 ```
 # Roma EUR — Yoga Calm — Monday 18:00
 55 17 * * 5  va login # va-automate:abc12345
-00 18 * * 6  va book --recurring --club 'Roma EUR' --course 'Yoga Calm' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345
+00 18 * * 6  va --dangerously-approve-token book --recurring --club 'Roma EUR' --course 'Yoga Calm' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345
 ```
 
-The login line runs 5 minutes before the booking line (both 48 h before class, on the preceding day), so the session is fresh.
+The login line runs 5 minutes before the booking line (both 48 h before class, on the preceding day), so the session is fresh. The book line uses `--dangerously-approve-token` because it runs unattended from cron.
 
 #### `va automate list`
 
@@ -308,9 +308,11 @@ va automate remove              # interactive selection
 
 1. Auto-logs in if no valid session exists (uses `.env` or keyring credentials)
 2. Searches the API for a class matching `--club`, `--course`, `--day`, `--time` on the correct date
-3. Books the found class by resolved token
+3. Books the found class by resolved token using the shared `va book` path
 4. On failure: sleeps `--retry-interval` seconds, retries up to `--retry` times
 5. On success or exhaustion: sends Telegram notification (if configured)
+
+Runs interactively (with approval prompt) or from cron with `--dangerously-approve-token`:
 
 ```bash
 va book --recurring \
@@ -331,60 +333,6 @@ va book --recurring \
 | `--time` | yes | Class start time HH:MM |
 | `--retry` | no | Max retry attempts (default 10) |
 | `--retry-interval` | no | Seconds between retries (default 60) |
-
-#### Telegram Notifications
-
-This walks you through selecting:
-
-1. Club
-2. Course (or any)
-3. Day of week (Mon–Sun)
-4. Specific class (shown for the nearest matching date)
-5. Retry settings (max retries, interval in seconds — default 10 retries, 60 s)
-
-At the end it prints two cron lines for you to copy into `crontab -e`. Example for a Monday 18:00 Yoga class:
-
-```
-# Roma EUR — Yoga Calm — Monday 18:00
-55 17 * * 5  va login
-00 18 * * 6  va book --recurring --club 'Roma EUR' --course 'Yoga Calm' --day 0 --time '18:00' --retry 10 --retry-interval 60
-```
-
-The login line runs 5 minutes before the booking line (both 48 h before class, on the preceding day), so the session is fresh.
-
-**`va book --recurring`** is a self-contained command that:
-
-1. Auto-logs in if no valid session exists (uses `.env` or keyring credentials)
-2. Searches the API for a class matching `--club`, `--course`, `--day`, `--time` on the correct date
-3. Books the found class by resolved token
-4. On failure: sleeps `--retry-interval` seconds, retries up to `--retry` times
-5. On success or exhaustion: sends Telegram notification (if configured)
-
-```bash
-va book --recurring \
-  --club "Roma EUR" \
-  --course "Yoga Calm" \
-  --day 0 \
-  --time "18:00" \
-  --retry 10 \
-  --retry-interval 60
-```
-
-| Flag | Required | Meaning |
-| --- | --- | --- |
-| `--recurring` | yes | Switches to filter-based booking |
-| `--club` | yes | Club name |
-| `--course` | no | Course name (optional, matches substring) |
-| `--day` | yes | Day of week: 0=Mon … 6=Sun |
-| `--time` | yes | Class start time HH:MM |
-| `--retry` | no | Max retry attempts (default 10) |
-| `--retry-interval` | no | Seconds between retries (default 60) |
-
-**Helper command** (used by the login cron entry):
-
-```bash
-va automate cron-login   # performs login, saves session
-```
 
 #### Telegram Notifications
 
