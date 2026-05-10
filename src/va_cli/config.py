@@ -7,31 +7,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-def _find_project_root(start: Path) -> Path:
-    """Walk up from *start* until a pyproject.toml is found, then return that directory."""
-    current = start.resolve()
-    while True:
-        if (current / "pyproject.toml").exists():
-            return current
-        parent = current.parent
-        if parent == current:  # reached filesystem root
-            break
-        current = parent
-    return start
-
-
-def _default_state_dir() -> Path:
-    return _find_project_root(Path.cwd()) / ".va_state"
-
-
-def _optional_env(name: str) -> str | None:
-    value = os.getenv(name)
-    if value is None:
-        return None
-    value = value.strip()
-    return value or None
-
-
 @dataclass(slots=True)
 class Config:
     username: str | None
@@ -70,10 +45,16 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         load_dotenv()
-        state_dir = Path(os.getenv("VA_STATE_DIR") or _default_state_dir())
+        state_dir = Path(os.getenv("VA_STATE_DIR") or Path.cwd() / ".va_state")
+
+        _u = os.getenv("VA_USERNAME")
+        username = _u.strip() if _u else None
+        _p = os.getenv("VA_PASSWORD")
+        password = _p.strip() if _p else None
+
         return cls(
-            username=_optional_env("VA_USERNAME"),
-            password=_optional_env("VA_PASSWORD"),
+            username=username,
+            password=password,
             login_page_url=os.getenv(
                 "VA_LOGIN_PAGE_URL",
                 "https://shop.virginactive.it/account/login",
