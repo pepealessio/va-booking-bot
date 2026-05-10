@@ -13,8 +13,8 @@ from va_cli import cli
 from va_cli.automate import (
     VA_MARKER_PREFIX,
     _cronline_to_dict,
-    _do_book_attempt,
     _do_remove,
+    _resolve_class_token,
     build_cron_entry,
     cmd_list,
     compute_cron_times,
@@ -22,7 +22,6 @@ from va_cli.automate import (
     worker_book_recurring,
 )
 from va_cli.client import VAError
-from va_cli.config import Config
 from va_cli.models import CalendarClass
 
 
@@ -123,25 +122,14 @@ class WorkerBookTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_success_first_attempt(self) -> None:
+        mock_client = MagicMock()
+        mock_client.book.return_value = {"StatusCode": 200, "StatusMessage": "ok"}
 
-        class SuccessClient:
-            def __init__(self, *_a, **_k):
-                pass
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def has_saved_session(self): return True
-            def list_classes(self, *_a, **_k):
-                return [CalendarClass(
-                    index=1, token="100c220", booking_id="100",
-                    booking_center="220", title="Yoga",
-                    date="2026-05-15", start_time="18:00",
-                )]
-            def book(self, *_a, **_k):
-                return {"StatusCode": 200, "StatusMessage": "ok"}
-
-        with patch("va_cli.automate.VirginActiveClient", SuccessClient):
+        with patch("va_cli.automate._resolve_class_token", return_value="100c220"):
             with patch("va_cli.automate.time.sleep"):
                 result = worker_book_recurring(
+                    client=mock_client,
+                    approve=lambda _: True,
                     state_dir=self.state_dir,
                     club="Roma EUR",
                     course="Yoga",
@@ -154,58 +142,32 @@ class WorkerBookTests(unittest.TestCase):
         self.assertEqual(result["attempts"], 1)
 
     def test_retry_on_error_then_succeeds(self) -> None:
-        attempts = [0]
+        mock_client = MagicMock()
+        mock_client.book.side_effect = [VAError("temporarily unavailable"), {"StatusCode": 200}]
 
-        class RetryClient:
-            def __init__(self, *_a, **_k):
-                pass
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def has_saved_session(self): return True
-            def list_classes(self, *_a, **_k):
-                return [CalendarClass(
-                    index=1, token="100c220", booking_id="100",
-                    booking_center="220", title="Yoga",
-                    date="2026-05-15", start_time="18:00",
-                )]
-            def book(self, *_a, **_k):
-                attempts[0] += 1
-                if attempts[0] >= 2:
-                    return {"StatusCode": 200, "StatusMessage": "ok"}
-                raise VAError("temporarily unavailable")
-
-        with patch("va_cli.automate.VirginActiveClient", RetryClient):
+        with patch("va_cli.automate._resolve_class_token", return_value="100c220"):
             with patch("va_cli.automate.time.sleep"):
                 result = worker_book_recurring(
+                    client=mock_client,
+                    approve=lambda _: True,
                     state_dir=self.state_dir,
                     club="Roma EUR", course="Yoga",
                     day_of_week=0, time_str="18:00",
                     max_retries=5, retry_interval=1,
                 )
         self.assertEqual(result["status"], "success")
-        self.assertGreaterEqual(result["attempts"], 2)
+        self.assertEqual(result["attempts"], 2)
 
     def test_exhausts_retries_raises(self) -> None:
+        mock_client = MagicMock()
+        mock_client.book.side_effect = VAError("server error")
 
-        class AlwaysFailClient:
-            def __init__(self, *_a, **_k):
-                pass
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def has_saved_session(self): return True
-            def list_classes(self, *_a, **_k):
-                return [CalendarClass(
-                    index=1, token="100c220", booking_id="100",
-                    booking_center="220", title="Yoga",
-                    date="2026-05-15", start_time="18:00",
-                )]
-            def book(self, *_a, **_k):
-                raise VAError("server error")
-
-        with patch("va_cli.automate.VirginActiveClient", AlwaysFailClient):
+        with patch("va_cli.automate._resolve_class_token", return_value="100c220"):
             with patch("va_cli.automate.time.sleep"):
                 with self.assertRaises(VAError):
                     worker_book_recurring(
+                        client=mock_client,
+                        approve=lambda _: True,
                         state_dir=self.state_dir,
                         club="Roma EUR", course="Yoga",
                         day_of_week=0, time_str="18:00",
@@ -215,6 +177,8 @@ class WorkerBookTests(unittest.TestCase):
     def test_missing_params_raises(self) -> None:
         with self.assertRaises(VAError):
             worker_book_recurring(
+                client=MagicMock(),
+                approve=lambda _: True,
                 state_dir=self.state_dir,
                 club=None,
                 course=None,
@@ -224,142 +188,63 @@ class WorkerBookTests(unittest.TestCase):
                 retry_interval=1,
             )
 
-    def test_fallback_to_course_name_match(self) -> None:
-
-        class FallbackClient:
-            def __init__(self, *_a, **_k):
-                pass
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def has_saved_session(self): return True
-            def list_classes(self, *_a, **_k):
-                return [CalendarClass(
-                    index=1, token="200c220", booking_id="200",
-                    booking_center="220", title="Yoga Calm Advanced",
-                    date="2026-05-15", start_time="19:00",
-                )]
-            def book(self, *_a, **_k):
-                return {"StatusCode": 200}
-
-        with patch("va_cli.automate.VirginActiveClient", FallbackClient):
-            with patch("va_cli.automate.time.sleep"):
-                result = worker_book_recurring(
-                    state_dir=self.state_dir,
-                    club="Roma EUR", course="Yoga Calm",
-                    day_of_week=0, time_str="18:00",
-                    max_retries=1, retry_interval=1,
-                )
-        self.assertEqual(result["status"], "success")
-
-    def test_relogins_on_stale_session(self) -> None:
-        login_called = [False]
-
-        class StaleClient:
-            def __init__(self, *_a, **_k):
-                pass
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def has_saved_session(self): return False
-            def login(self):
-                login_called[0] = True
-            def list_classes(self, *_a, **_k):
-                return [CalendarClass(
-                    index=1, token="300c220", booking_id="300",
-                    booking_center="220", title="Yoga",
-                    date="2026-05-15", start_time="18:00",
-                )]
-            def book(self, *_a, **_k):
-                return {"StatusCode": 200}
-
-        with patch("va_cli.automate.VirginActiveClient", StaleClient):
-            with patch("va_cli.automate.time.sleep"):
-                result = worker_book_recurring(
-                    state_dir=self.state_dir,
-                    club="Roma EUR", course="Yoga",
-                    day_of_week=0, time_str="18:00",
-                    max_retries=1, retry_interval=1,
-                )
-        self.assertTrue(login_called[0])
-        self.assertEqual(result["status"], "success")
-
 
 # =====================================================================
-# 4. _do_book_attempt tests (3 tests)
+# 4. _resolve_class_token tests (4 tests)
 # =====================================================================
 
 
-class DoBookAttemptTests(unittest.TestCase):
-
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.state_dir = Path(self._tmp.name)
-        self.config = make_config(self.state_dir)
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
+class ResolveClassTokenTests(unittest.TestCase):
 
     def test_matches_by_time(self) -> None:
+        mock_client = MagicMock()
+        mock_client.list_classes.return_value = [CalendarClass(
+            index=1, token="100c220", booking_id="100",
+            booking_center="220", title="Yoga",
+            date="2026-05-15", start_time="18:00",
+        )]
 
-        class MatchClient:
-            def __init__(self, *_a, **_k):
-                pass
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def has_saved_session(self): return True
-            def list_classes(self, *_a, **_k):
-                return [CalendarClass(
-                    index=1, token="100c220", booking_id="100",
-                    booking_center="220", title="Yoga",
-                    date="2026-05-15", start_time="18:00",
-                )]
-            def book(self, *_a, **_k):
-                return {"StatusCode": 200}
-
-        with patch("va_cli.automate.VirginActiveClient", MatchClient):
-            result = _do_book_attempt(
-                self.config, "Roma EUR", "Yoga", 0, "18:00"
-            )
-        self.assertEqual(result["StatusCode"], 200)
+        token = _resolve_class_token(mock_client, "Roma EUR", "Yoga", 0, "18:00")
+        self.assertEqual(token, "100c220")
 
     def test_raises_on_no_match(self) -> None:
+        mock_client = MagicMock()
+        mock_client.list_classes.return_value = [CalendarClass(
+            index=1, token="100c220", booking_id="100",
+            booking_center="220", title="Spinning",
+            date="2026-05-15", start_time="09:00",
+        )]
 
-        class NoMatchClient:
-            def __init__(self, *_a, **_k):
-                pass
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def has_saved_session(self): return True
-            def list_classes(self, *_a, **_k):
-                return [CalendarClass(
-                    index=1, token="100c220", booking_id="100",
-                    booking_center="220", title="Spinning",
-                    date="2026-05-15", start_time="09:00",
-                )]
-
-        with patch("va_cli.automate.VirginActiveClient", NoMatchClient):
-            with self.assertRaises(VAError):
-                _do_book_attempt(self.config, "Roma EUR", "Yoga", 0, "18:00")
+        with self.assertRaises(VAError):
+            _resolve_class_token(mock_client, "Roma EUR", "Yoga", 0, "18:00")
 
     def test_fallback_course_name(self) -> None:
+        mock_client = MagicMock()
+        mock_client.list_classes.return_value = [CalendarClass(
+            index=1, token="200c220", booking_id="200",
+            booking_center="220", title="Yoga Calm",
+            date="2026-05-15", start_time="19:00",
+        )]
 
-        class FallbackClient:
-            def __init__(self, *_a, **_k):
-                pass
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def has_saved_session(self): return True
-            def list_classes(self, *_a, **_k):
-                return [CalendarClass(
-                    index=1, token="200c220", booking_id="200",
-                    booking_center="220", title="Yoga Calm",
-                    date="2026-05-15", start_time="19:00",
-                )]
-            def book(self, *_a, **_k):
-                return {"StatusCode": 200}
+        token = _resolve_class_token(mock_client, "Roma EUR", "Yoga Calm", 0, "18:00")
+        self.assertEqual(token, "200c220")
 
-        with patch("va_cli.automate.VirginActiveClient", FallbackClient):
-            result = _do_book_attempt(self.config, "Roma EUR", "Yoga Calm", 0, "18:00")
-        self.assertEqual(result["StatusCode"], 200)
+    def test_relogins_on_list_classes_error(self) -> None:
+        login_called = [False]
+        mock_client = MagicMock()
+        mock_client.login.side_effect = lambda: login_called.__setitem__(0, True)
+        mock_client.list_classes.side_effect = [
+            VAError("session expired"),
+            [CalendarClass(
+                index=1, token="300c220", booking_id="300",
+                booking_center="220", title="Yoga",
+                date="2026-05-15", start_time="18:00",
+            )],
+        ]
+
+        token = _resolve_class_token(mock_client, "Roma EUR", "Yoga", 0, "18:00")
+        self.assertTrue(login_called[0])
+        self.assertEqual(token, "300c220")
 
 
 # =====================================================================
@@ -455,16 +340,6 @@ class CliRecurringTests(unittest.TestCase):
                 cli.main(["book"])
         self.assertEqual(exc.exception.code, 2)
 
-    @patch("va_cli.cli.CredentialStore")
-    def test_automate_cron_login_works(self, store_cls) -> None:
-        store_cls.return_value.load.return_value = None
-        with patch("va_cli.cli.VirginActiveClient", FakeAutomateClient):
-            stdout = io.StringIO()
-            with redirect_stdout(stdout):
-                code = cli.main(["automate", "cron-login"])
-        self.assertEqual(code, 0)
-
-
 # =====================================================================
 # 11. Crontab entry ID marker (3 tests)
 # =====================================================================
@@ -472,10 +347,10 @@ class CliRecurringTests(unittest.TestCase):
 
 class CronEntryMarkerTests(unittest.TestCase):
 
-    def test_marker_in_login_and_book(self) -> None:
+    def test_marker_in_all_lines(self) -> None:
         lines = build_cron_entry("Roma EUR", 0, "18:00", entry_id="abc12345")
-        self.assertIn(VA_MARKER_PREFIX + "abc12345", lines[1])
-        self.assertIn(VA_MARKER_PREFIX + "abc12345", lines[2])
+        for i in range(3):
+            self.assertIn(VA_MARKER_PREFIX + "abc12345", lines[i])
 
     def test_marker_in_comment(self) -> None:
         lines = build_cron_entry("Roma EUR", 0, "18:00", entry_id="abc12345")
@@ -484,8 +359,8 @@ class CronEntryMarkerTests(unittest.TestCase):
 
     def test_auto_generates_id_when_none(self) -> None:
         lines = build_cron_entry("Roma EUR", 0, "18:00")
-        for i in (1, 2):
-            self.assertIn(VA_MARKER_PREFIX, lines[i])
+        self.assertIn(VA_MARKER_PREFIX, lines[0])
+        self.assertIn(VA_MARKER_PREFIX, lines[1])
 
 
 # =====================================================================
@@ -504,11 +379,6 @@ class CronlineParserTests(unittest.TestCase):
         self.assertEqual(result["course"], "Yoga")
         self.assertEqual(result["day"], "Monday")
         self.assertEqual(result["time"], "18:00")
-
-    def test_skips_login_line(self) -> None:
-        line = "55 17 * * 5 va login # va-automate:abc12345"
-        result = _cronline_to_dict(line)
-        self.assertIsNone(result)
 
     def test_skips_comment_line(self) -> None:
         result = _cronline_to_dict("# Roma EUR — Yoga — Monday 18:00")
@@ -531,7 +401,6 @@ class CmdListTests(unittest.TestCase):
     def test_returns_entries(self) -> None:
         crontab = (
             "# Roma EUR\n"
-            "55 17 * * 5 va login # va-automate:abc12345\n"
             "00 18 * * 6 va book --recurring --club 'Roma EUR' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345\n"
         )
         with patch("va_cli.automate._read_crontab", return_value=crontab):
@@ -550,7 +419,6 @@ class CmdRemoveTests(unittest.TestCase):
     def test_found_and_removed(self) -> None:
         crontab = (
             "# Yoga\n"
-            "55 17 * * 5 va login # va-automate:abc12345\n"
             "00 18 * * 6 va book --recurring --club 'Roma EUR' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345\n"
         )
         written: list[str] = []

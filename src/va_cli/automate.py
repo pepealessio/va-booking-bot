@@ -11,8 +11,7 @@ from typing import Any
 
 import questionary
 
-from .client import VAError, VirginActiveClient
-from .config import Config
+from .client import VAError, VirginActiveClient, ApprovalCallback
 from .notifier import from_config
 
 # ── Day name helpers ─────────────────────────────────────────────
@@ -83,7 +82,7 @@ def build_cron_entry(
     va_bin: str = "va",
     entry_id: str | None = None,
 ) -> list[str]:
-    """Return two cron lines (login + book) as strings for copy-paste."""
+    """Return three cron lines (comment + login + book) as strings for copy-paste."""
     if entry_id is None:
         entry_id = _generate_id()
     cron = compute_cron_times(day_of_week, time_str)
@@ -120,8 +119,60 @@ def _setup_logger(state_dir: Path) -> logging.Logger:
 # ── Worker: book --recurring ──────────────────────────────────────
 
 
+def _resolve_class_token(
+    client: VirginActiveClient,
+    club: str | None,
+    course: str | None,
+    day_of_week: int | None,
+    time_str: str | None,
+) -> str:
+    """Find a class matching the given filters and return its booking token."""
+    today = datetime.now(UTC).date()
+    target_date = None
+    for d in range(2, 14):
+        dt = today + timedelta(days=d)
+        if dt.weekday() == day_of_week:
+            target_date = dt.strftime("%Y-%m-%d")
+            break
+    if target_date is None:
+        raise VAError(f"Cannot find target date for day_of_week={day_of_week}")
+
+    filters: dict[str, str | None] = {
+        "club": club,
+        "course": course,
+        "date": target_date,
+        "trainer": None,
+        "target": None,
+    }
+
+    try:
+        found = client.list_classes(filters, use_auth=True, approve=lambda _: True)
+    except VAError:
+        client.login()
+        found = client.list_classes(filters, use_auth=True, approve=lambda _: True)
+
+    matched = [c for c in found if c.start_time == time_str]
+    if not matched and course:
+        matched = [
+            c for c in found
+            if course.lower() in (c.title or "").lower()
+        ]
+    if not matched:
+        raise VAError(
+            f"Cannot find class matching time={time_str}, date={target_date}. "
+            f"Found {len(found)} classes for that date."
+        )
+
+    target = matched[0]
+    logger = logging.getLogger("va-automate")
+    logger.info("found class %s (%s)", target.token, target.title)
+    return target.token
+
+
 def worker_book_recurring(
     *,
+    client: VirginActiveClient,
+    approve: ApprovalCallback,
     state_dir: Path,
     club: str | None,
     course: str | None,
@@ -130,9 +181,11 @@ def worker_book_recurring(
     max_retries: int = 10,
     retry_interval: int = 60,
 ) -> dict[str, Any]:
-    """Self-contained recurring booking worker.
+    """Recurring booking worker.
 
-    Resolves the class at runtime by filters, books it, and retries on failure.
+    Resolves the class at runtime by filters, books it via the shared client,
+    and retries on failure. Uses the approval callback from the CLI so that
+    --dangerously-approve-token is respected.
     """
     if not club or day_of_week is None or not time_str:
         raise VAError("--recurring requires --club, --day, and --time")
@@ -141,7 +194,6 @@ def worker_book_recurring(
     class_desc = f"{club}/{course or 'any'} @ {time_str} ({DOW_NAMES[day_of_week]})"
     logger.info("cron-book: starting for %s", class_desc)
 
-    # Load notifier config for Telegram
     import os
     notify_cfg = {
         "provider": os.environ.get("VA_NOTIFY_PROVIDER", "telegram"),
@@ -152,12 +204,11 @@ def worker_book_recurring(
         notify_cfg = None
     notifier = from_config(notify_cfg)
 
-    config = Config.from_env()
-
     for attempt in range(1, max_retries + 1):
         logger.info("attempt %d/%d", attempt, max_retries)
         try:
-            result = _do_book_attempt(config, club, course, day_of_week, time_str)
+            token = _resolve_class_token(client, club, course, day_of_week, time_str)
+            result = client.book(token, approve=approve)
             status_code = result.get("StatusCode", result.get("statusCode"))
             if status_code == 200 or (isinstance(status_code, str) and status_code == "200"):
                 logger.info("SUCCESS on attempt %d", attempt)
@@ -186,66 +237,6 @@ def worker_book_recurring(
         f"Booking failed: **{class_desc}** after {max_retries} attempts",
     )
     raise VAError(f"Failed to book {class_desc} after {max_retries} attempts")
-
-
-def _do_book_attempt(
-    config: Config,
-    club: str,
-    course: str | None,
-    day_of_week: int,
-    time_str: str,
-) -> dict[str, Any]:
-    """Find and book one class. Returns the booking result dict or raises VAError."""
-    # The cron runs 48h before the class. The class is on today + 2 days.
-    # But we also need the target date to match the correct day_of_week.
-    # So find the next date where weekday matches day_of_week, that is >= today+2.
-    today = datetime.now(UTC).date()
-    target_date = None
-    for d in range(2, 14):
-        dt = today + timedelta(days=d)
-        if dt.weekday() == day_of_week:
-            target_date = dt.strftime("%Y-%m-%d")
-            break
-    if target_date is None:
-        raise VAError("Cannot find target date for day_of_week={}".format(day_of_week))
-
-    filters: dict[str, str | None] = {
-        "club": club,
-        "course": course,
-        "date": target_date,
-        "trainer": None,
-        "target": None,
-    }
-
-    with VirginActiveClient(config, verbose=False) as client:
-        if not client.has_saved_session():
-            try:
-                client.login()
-            except VAError:
-                raise VAError("No saved session and cannot log in")
-
-        try:
-            found = client.list_classes(filters, use_auth=True, approve=lambda _: True)
-        except VAError:
-            client.login()
-            found = client.list_classes(filters, use_auth=True, approve=lambda _: True)
-
-        matched = [c for c in found if c.start_time == time_str]
-        if not matched and course:
-            matched = [
-                c for c in found
-                if course.lower() in (c.title or "").lower()
-            ]
-        if not matched:
-            raise VAError(
-                f"Cannot find class matching time={time_str}, date={target_date}. "
-                f"Found {len(found)} classes for that date."
-            )
-
-        target = matched[0]
-        logger = logging.getLogger("va-automate")
-        logger.info("found class %s (%s)", target.token, target.title)
-        return client.book(target.token, approve=lambda _: True)
 
 
 # ── Interactive add flow → print cron lines ────────────────────────

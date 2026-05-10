@@ -71,8 +71,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("--install", action="store_true", help="Automatically install cron entries into crontab.")
     add_parser.add_argument("--raw", action="store_true", help="Print only cron lines (no commentary), suitable for piping to crontab.")
 
-    auto_sub.add_parser("cron-login", help="[internal] Cron worker: login.")
-
     list_parser = auto_sub.add_parser("list", help="List recurring booking entries from crontab.")
     list_parser.add_argument("--json", action="store_true", dest="list_as_json")
     list_parser.add_argument("--raw", action="store_true", help="Print only cron lines from all va-automate entries, suitable for piping.")
@@ -138,6 +136,8 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
     if args.command == "book":
         if getattr(args, "recurring", False):
             return worker_book_recurring(
+                client=client,
+                approve=approve,
                 state_dir=client.config.state_dir,
                 club=getattr(args, "book_club"),
                 course=getattr(args, "book_course"),
@@ -166,8 +166,6 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
         cmd = getattr(args, "automate_command", None)
         if cmd == "add":
             return cmd_add(client, install=getattr(args, "install", False), raw=getattr(args, "raw", False))
-        if cmd == "cron-login":
-            return {"status": "success"}
         if cmd == "list":
             result = cmd_list()
             if getattr(args, "list_as_json", False) or args.as_json:
