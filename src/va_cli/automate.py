@@ -375,6 +375,7 @@ def interactive_add(
         max_retries=max_retries_val,
         retry_interval=retry_interval_val,
         entry_id=entry_id,
+        va_bin=sys.argv[0],
     )
 
     cron_content = "\n".join(lines) + "\n"
