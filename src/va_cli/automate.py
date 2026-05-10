@@ -21,10 +21,6 @@ from .notifier import from_config
 
 DOW_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
-# Python DOW → cron DOW (Mon=0->1, Tue=1->2, … Sun=6->0)
-def _python_dow_to_cron(py_dow: int) -> int:
-    return (py_dow + 1) % 7
-
 
 # ── Cron computation ──────────────────────────────────────────────
 
@@ -59,7 +55,7 @@ def compute_cron_times(
             extra_days += 1
         result[f"{label}_hour"] = diff // 60
         result[f"{label}_minute"] = diff % 60
-        result[f"{label}_dow"] = _python_dow_to_cron((py_dow - extra_days) % 7)
+        result[f"{label}_dow"] = ((py_dow - extra_days) % 7 + 1) % 7
 
     return result
 

@@ -126,13 +126,36 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
 
     if args.command == "login":
         client.login()
-        if _should_save_credentials(args):
+        if args.save or getattr(args, "credential_source", None) == "prompt":
+            if not args.save:
+                answer = input("Save credentials to system keyring? [y/N]: ")
+                if answer.strip().lower() not in {"y", "yes"}:
+                    return {"status": "success"}
             credential_store.save(client.config.username or "", client.config.password or "")
         return {"status": "success"}
     if args.command == "classes":
         use_auth = client.has_saved_session() and not args.no_auth
-        classes = client.list_classes(_filters_from_args(args), use_auth=use_auth, approve=approve if use_auth else None)
-        return [_class_to_output(item) for item in _filter_classes_by_time(classes, args)]
+        flt: dict[str, str | None] = {
+            "course": getattr(args, "course", None),
+            "trainer": getattr(args, "trainer", None),
+            "club": getattr(args, "club", None),
+            "date": getattr(args, "date", None),
+            "target": getattr(args, "target", None),
+        }
+        classes = client.list_classes(flt, use_auth=use_auth, approve=approve if use_auth else None)
+        result = []
+        for item in _filter_classes_by_time(classes, args):
+            out: dict[str, Any] = {
+                "id": item.token, "title": item.title, "date": item.date,
+                "start_time": item.start_time, "end_time": item.end_time,
+                "club": item.club, "trainer": item.trainer, "room": item.room,
+                "status": item.status, "booking_id": item.booking_id,
+                "booking_center": item.booking_center, "duration": item.duration,
+                "queue_length": item.queue_length, "available_places": item.available_places,
+                "button_label": item.button_label,
+            }
+            result.append({k: v for k, v in out.items() if v is not None})
+        return result
     if args.command == "book":
         if getattr(args, "recurring", False):
             return worker_book_recurring(
@@ -161,7 +184,14 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
         filters = client.get_calendar_filters()
         return [item.to_dict() for item in getattr(filters, args.debug_command)]
     if args.command == "debug" and args.debug_command == "dates":
-        return [item.to_dict() for item in client.get_calendar_dates(_filters_from_args(args))]
+        flt: dict[str, str | None] = {
+            "course": getattr(args, "course", None),
+            "trainer": getattr(args, "trainer", None),
+            "club": getattr(args, "club", None),
+            "date": getattr(args, "date", None),
+            "target": getattr(args, "target", None),
+        }
+        return [item.to_dict() for item in client.get_calendar_dates(flt)]
     if args.command == "automate":
         cmd = getattr(args, "automate_command", None)
         if cmd == "add":
@@ -250,17 +280,6 @@ def _resolve_credentials(
     return username or None, password or None
 
 
-def _should_save_credentials(args: argparse.Namespace) -> bool:
-    if args.command != "login":
-        return False
-    if args.save:
-        return True
-    if getattr(args, "credential_source", None) == "prompt":
-        answer = input("Save credentials to system keyring? [y/N]: ")
-        return answer.strip().lower() in {"y", "yes"}
-    return False
-
-
 def _approval_callback(args: argparse.Namespace):
     if getattr(args, "dangerously_approve_token", False):
         return lambda _purpose: True
@@ -272,16 +291,6 @@ def _approval_callback(args: argparse.Namespace):
         return answer.strip().lower() in {"y", "yes"}
 
     return prompt
-
-
-def _filters_from_args(args: argparse.Namespace) -> dict[str, str | None]:
-    return {
-        "course": getattr(args, "course", None),
-        "trainer": getattr(args, "trainer", None),
-        "club": getattr(args, "club", None),
-        "date": getattr(args, "date", None),
-        "target": getattr(args, "target", None),
-    }
 
 
 def _filter_classes_by_time(classes: list[CalendarClass], args: argparse.Namespace) -> list[CalendarClass]:
@@ -322,22 +331,18 @@ def _json_ready(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_ready(item) for item in value]
     if isinstance(value, dict):
-        return {
-            _normalize_key(key): _json_ready(item)
-            for key, item in value.items()
-            if item is not None
-        }
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if item is None:
+                continue
+            snake = []
+            for i, ch in enumerate(key):
+                if ch.isupper() and i > 0:
+                    snake.append("_")
+                snake.append(ch.lower())
+            result["".join(snake)] = _json_ready(item)
+        return result
     return value
-
-
-def _normalize_key(key: str) -> str:
-    """Convert CamelCase to snake_case for JSON output."""
-    result = []
-    for i, ch in enumerate(key):
-        if ch.isupper() and i > 0:
-            result.append("_")
-        result.append(ch.lower())
-    return "".join(result)
 
 
 def _format_row(item: Any) -> str:
@@ -379,87 +384,50 @@ def _class_to_output(item: CalendarClass) -> dict[str, Any]:
     return {k: v for k, v in result.items() if v is not None}
 
 
+LABELS = {
+    "id": "ID", "title": "Class", "date": "Date", "start_time": "Start",
+    "end_time": "End", "club": "Club", "trainer": "Trainer", "room": "Room",
+    "status": "Status", "queue_length": "Queue", "available_places": "Places",
+    "booking_id": "Booking ID", "booking_center": "Center", "duration": "Duration",
+    "button_label": "Button", "label": "Name", "value": "Value",
+    "weekday": "Weekday", "day_number": "Day", "selected": "Selected",
+}
+
+COLUMN_ORDER = [
+    "id", "club", "course", "day", "time", "title", "date", "start_time",
+    "end_time", "trainer", "room", "status", "queue_length", "available_places",
+    "booking_id", "booking_center", "duration", "button_label",
+    "label", "value", "weekday", "day_number", "selected",
+]
+
+
 def _render_table(rows: list[dict[str, Any]]) -> str:
-    columns = _table_columns(rows)
-    normalized_rows = []
+    seen = {key for row in rows for key, value in row.items() if value is not None}
+    columns = [key for key in COLUMN_ORDER if key in seen]
+    columns.extend(sorted(seen - set(columns)))
+
+    normalized = []
     for row in rows:
-        normalized_rows.append([_stringify_cell(row.get(column)) for column in columns])
+        normalized.append([])
+        for column in columns:
+            val = row.get(column)
+            if val is None:
+                normalized[-1].append("")
+            elif isinstance(val, bool):
+                normalized[-1].append("yes" if val else "no")
+            elif isinstance(val, (list, dict)):
+                normalized[-1].append(json.dumps(val, ensure_ascii=False, sort_keys=True))
+            else:
+                normalized[-1].append(str(val))
+
     widths = []
     for index, column in enumerate(columns):
-        label = _column_label(column)
-        widths.append(max(len(label), *(len(row[index]) for row in normalized_rows)))
-    header = " | ".join(_column_label(column).ljust(widths[index]) for index, column in enumerate(columns))
-    separator = "-+-".join("-" * widths[index] for index in range(len(columns)))
+        label = LABELS.get(column, column.replace("_", " ").title())
+        widths.append(max(len(label), *(len(row[index]) for row in normalized)))
+
+    header = " | ".join(LABELS.get(c, c.replace("_", " ").title()).ljust(widths[i]) for i, c in enumerate(columns))
+    separator = "-+-".join("-" * w for w in widths)
     lines = [header, separator]
-    for row in normalized_rows:
-        lines.append(" | ".join(cell.ljust(widths[index]) for index, cell in enumerate(row)))
+    for row in normalized:
+        lines.append(" | ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)))
     return "\n".join(lines)
-
-
-def _table_columns(rows: list[dict[str, Any]]) -> list[str]:
-    preferred = [
-        "id",
-        "club",
-        "course",
-        "day",
-        "time",
-        "title",
-        "date",
-        "start_time",
-        "end_time",
-        "trainer",
-        "room",
-        "status",
-        "queue_length",
-        "available_places",
-        "booking_id",
-        "booking_center",
-        "duration",
-        "button_label",
-        "label",
-        "value",
-        "weekday",
-        "day_number",
-        "selected",
-    ]
-    seen = {key for row in rows for key, value in row.items() if value is not None}
-    columns = [key for key in preferred if key in seen]
-    extras = sorted(seen - set(columns))
-    return columns + extras
-
-
-def _column_label(column: str) -> str:
-    labels = {
-        "id": "ID",
-        "title": "Class",
-        "date": "Date",
-        "start_time": "Start",
-        "end_time": "End",
-        "club": "Club",
-        "trainer": "Trainer",
-        "room": "Room",
-        "status": "Status",
-        "queue_length": "Queue",
-        "available_places": "Places",
-        "booking_id": "Booking ID",
-        "booking_center": "Center",
-        "duration": "Duration",
-        "button_label": "Button",
-        "label": "Name",
-        "value": "Value",
-        "weekday": "Weekday",
-        "day_number": "Day",
-        "selected": "Selected",
-
-    }
-    return labels.get(column, column.replace("_", " ").title())
-
-
-def _stringify_cell(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return "yes" if value else "no"
-    if isinstance(value, (list, dict)):
-        return json.dumps(value, ensure_ascii=False, sort_keys=True)
-    return str(value)

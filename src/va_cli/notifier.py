@@ -6,12 +6,6 @@ from typing import Any
 import httpx
 
 
-class Notifier:
-    """Protocol for sending notifications. Call `send(level, message)`."""
-
-    def send(self, level: str, message: str) -> None: ...
-
-
 class NullNotifier:
     """No-op notifier when nothing is configured."""
 
@@ -50,7 +44,7 @@ class TelegramNotifier:
             pass
 
 
-def from_config(notify_cfg: dict[str, Any] | None) -> Notifier:
+def from_config(notify_cfg: dict[str, Any] | None) -> NullNotifier | TelegramNotifier:
     """Build a notifier from optional config and/or env vars.
 
     Env vars `VA_NOTIFY_TOKEN` and `VA_NOTIFY_CHAT_ID` override any dict values
