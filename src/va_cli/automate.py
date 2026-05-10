@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
+import random
 import re
-import sys
+import subprocess
 import time
 from datetime import UTC, datetime, timedelta
 from logging.handlers import RotatingFileHandler
@@ -67,7 +69,6 @@ VA_MARKER_PREFIX = "# va-automate:"
 
 def _generate_id() -> str:
     """Generate a short, unique ID for a cron entry set."""
-    import random
     chars = "abcdefghijklmnopqrstuvwxyz0123456789"
     return "".join(random.choices(chars, k=8))
 
@@ -194,15 +195,7 @@ def worker_book_recurring(
     class_desc = f"{club}/{course or 'any'} @ {time_str} ({DOW_NAMES[day_of_week]})"
     logger.info("cron-book: starting for %s", class_desc)
 
-    import os
-    notify_cfg = {
-        "provider": os.environ.get("VA_NOTIFY_PROVIDER", "telegram"),
-        "token": os.environ.get("VA_NOTIFY_TOKEN"),
-        "chat_id": os.environ.get("VA_NOTIFY_CHAT_ID"),
-    }
-    if not notify_cfg["token"] or not notify_cfg["chat_id"]:
-        notify_cfg = None
-    notifier = from_config(notify_cfg)
+    notifier = from_config(None)
 
     last_error: str | None = None
 
@@ -438,7 +431,6 @@ def cmd_add(client: VirginActiveClient, *, install: bool = False, raw: bool = Fa
 
 def _read_crontab() -> str:
     """Return the current crontab content as a string."""
-    import subprocess
     result = subprocess.run(
         ["crontab", "-l"], capture_output=True, text=True
     )
@@ -449,7 +441,6 @@ def _read_crontab() -> str:
 
 def _write_crontab(content: str) -> None:
     """Write content to the user's crontab."""
-    import subprocess
     proc = subprocess.run(
         ["crontab", "-"], input=content, capture_output=True, text=True
     )

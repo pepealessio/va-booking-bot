@@ -55,6 +55,26 @@ def _extract_count(button_label: str | None, patterns: tuple[re.Pattern[str], ..
     return None
 
 
+def _finalize_date_option(
+    date_state: dict[str, str | bool] | None,
+    date_text: list[str] | None,
+    date_options: list[CalendarDateOption],
+) -> None:
+    """Finalize a ``calendarDay`` date option into *date_options* if the text is valid."""
+    if date_state is None or date_text is None:
+        return
+    parts = [item for item in (_normalize(x) for x in date_text) if item]
+    if len(parts) >= 2:
+        date_options.append(
+            CalendarDateOption(
+                date=str(date_state["date"]),
+                weekday=parts[0],
+                day_number=parts[1],
+                selected=bool(date_state["selected"]),
+            )
+        )
+
+
 def _normalize_status(button_label: str | None) -> str:
     if not button_label:
         return "unavailable"
@@ -129,17 +149,8 @@ class CalendarPageParser(HTMLParser):
                 self.filters.targets.append(FilterOption(label=label, value=value))
             self._current_target = None
             self._current_target_text = None
-        elif tag == "div" and self._current_date is not None and self._current_date_text is not None:
-            parts = [item for item in (_normalize(x) for x in self._current_date_text) if item]
-            if len(parts) >= 2:
-                self.date_options.append(
-                    CalendarDateOption(
-                        date=str(self._current_date["date"]),
-                        weekday=parts[0],
-                        day_number=parts[1],
-                        selected=bool(self._current_date["selected"]),
-                    )
-                )
+        elif tag == "div":
+            _finalize_date_option(self._current_date, self._current_date_text, self.date_options)
             self._current_date = None
             self._current_date_text = None
 
@@ -226,17 +237,8 @@ class CalendarClassParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if self._current_date is not None:
             self._date_depth -= 1
-            if tag == "div" and self._date_depth == 0 and self._current_date_text is not None:
-                parts = [item for item in (_normalize(x) for x in self._current_date_text) if item]
-                if len(parts) >= 2:
-                    self.date_options.append(
-                        CalendarDateOption(
-                            date=str(self._current_date["date"]),
-                            weekday=parts[0],
-                            day_number=parts[1],
-                            selected=bool(self._current_date["selected"]),
-                        )
-                    )
+            if tag == "div" and self._date_depth == 0:
+                _finalize_date_option(self._current_date, self._current_date_text, self.date_options)
                 self._current_date = None
                 self._current_date_text = None
             return

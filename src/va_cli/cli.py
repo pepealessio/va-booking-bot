@@ -343,8 +343,6 @@ def _normalize_key(key: str) -> str:
 def _format_row(item: Any) -> str:
     if not isinstance(item, dict):
         return str(item)
-    if "label" in item and "value" in item:
-        return f"{item['label']} | value={item['value']}"
     preferred_order = [
         "token",
         "title",
@@ -452,8 +450,7 @@ def _column_label(column: str) -> str:
         "weekday": "Weekday",
         "day_number": "Day",
         "selected": "Selected",
-        "overbooked": "Overbooked",
-        "not_yet_open": "Not Open",
+
     }
     return labels.get(column, column.replace("_", " ").title())
 

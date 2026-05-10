@@ -51,19 +51,21 @@ class TelegramNotifier:
 
 
 def from_config(notify_cfg: dict[str, Any] | None) -> Notifier:
-    """Build a notifier from a config dict.
+    """Build a notifier from optional config and/or env vars.
 
-    Env vars `VA_NOTIFY_TOKEN` and `VA_NOTIFY_CHAT_ID` override the dict values.
-    Falls back to `NullNotifier` when configuration is incomplete.
+    Env vars `VA_NOTIFY_TOKEN` and `VA_NOTIFY_CHAT_ID` override any dict values
+    and can be used on their own (pass ``None`` or an empty dict).
+    Falls back to ``NullNotifier`` when configuration is incomplete.
     """
-    if not notify_cfg:
-        return NullNotifier()
+    token: str | None = None
+    chat_id: str | None = None
+    provider = "telegram"
 
-    # Read YAML values
-    token: str | None = notify_cfg.get("token")
-    chat_id: str | None = notify_cfg.get("chat_id")
+    if notify_cfg:
+        token = notify_cfg.get("token")
+        chat_id = notify_cfg.get("chat_id")
+        provider = notify_cfg.get("provider", "telegram").lower()
 
-    # Env vars take precedence
     env_token = os.environ.get("VA_NOTIFY_TOKEN")
     if env_token:
         token = env_token.strip()
@@ -75,7 +77,6 @@ def from_config(notify_cfg: dict[str, Any] | None) -> Notifier:
     if not token or not chat_id:
         return NullNotifier()
 
-    provider = notify_cfg.get("provider", "telegram").lower()
     if provider == "telegram":
         return TelegramNotifier(token, chat_id)
 
