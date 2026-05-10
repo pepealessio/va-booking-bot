@@ -91,7 +91,7 @@ def build_cron_entry(
     login_line = "%02d %02d * * %d %s login %s" % (
         cron["login_minute"], cron["login_hour"], cron["login_dow"], va_bin, marker,
     )
-    book_line = "%02d %02d * * %d %s book --recurring --club '%s'%s --day %d --time '%s' --retry %d --retry-interval %d %s" % (
+    book_line = "%02d %02d * * %d %s --dangerously-approve-token book --recurring --club '%s'%s --day %d --time '%s' --retry %d --retry-interval %d %s" % (
         cron["book_minute"], cron["book_hour"], cron["book_dow"], va_bin,
         club, course_part, day_of_week, time_str, max_retries, retry_interval, marker,
     )

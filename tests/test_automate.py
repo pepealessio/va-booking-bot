@@ -76,7 +76,7 @@ class CronComputationTests(unittest.TestCase):
         self.assertEqual(len(lines), 3)
         self.assertTrue(lines[0].startswith("#"))
         self.assertIn("va login", lines[1])
-        self.assertIn("va book --recurring", lines[2])
+        self.assertIn("va --dangerously-approve-token book --recurring", lines[2])
         self.assertIn("--club 'Roma EUR'", lines[2])
         self.assertIn("--course 'Yoga'", lines[2])
 
