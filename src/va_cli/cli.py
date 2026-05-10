@@ -77,7 +77,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     remove_parser = auto_sub.add_parser("remove", help="Remove a booking entry from crontab.")
     remove_parser.add_argument("entry_id", nargs="?", default=None, help="Entry ID to remove (skips interactive prompt).")
-    remove_parser.add_argument("--force", action="store_true", help="Skip confirmation prompt when entry_id is provided.")
 
     return parser
 
@@ -220,11 +219,7 @@ def render(payload: Any, *, as_json: bool) -> None:
         if not payload:
             print("No results.")
             return
-        if all(isinstance(item, dict) for item in payload):
-            print(_render_table(payload))
-            return
-        for item in payload:
-            print(_format_row(item))
+        print(_render_table(payload))
         return
     if isinstance(payload, dict):
         if payload.keys() == {"status"} and payload["status"] == "success":
@@ -343,45 +338,6 @@ def _json_ready(value: Any) -> Any:
             result["".join(snake)] = _json_ready(item)
         return result
     return value
-
-
-def _format_row(item: Any) -> str:
-    if not isinstance(item, dict):
-        return str(item)
-    preferred_order = [
-        "token",
-        "title",
-        "date",
-        "start_time",
-        "end_time",
-        "club",
-        "trainer",
-        "room",
-        "status",
-    ]
-    parts = [f"{key}={item[key]}" for key in preferred_order if key in item and item[key] is not None]
-    return " | ".join(parts) if parts else str(item)
-
-
-def _class_to_output(item: CalendarClass) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "id": item.token,
-        "title": item.title,
-        "date": item.date,
-        "start_time": item.start_time,
-        "end_time": item.end_time,
-        "club": item.club,
-        "trainer": item.trainer,
-        "room": item.room,
-        "status": item.status,
-        "booking_id": item.booking_id,
-        "booking_center": item.booking_center,
-        "duration": item.duration,
-        "queue_length": item.queue_length,
-        "available_places": item.available_places,
-        "button_label": item.button_label,
-    }
-    return {k: v for k, v in result.items() if v is not None}
 
 
 LABELS = {
