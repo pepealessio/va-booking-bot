@@ -7,8 +7,21 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+def _find_project_root(start: Path) -> Path:
+    """Walk up from *start* until a pyproject.toml is found, then return that directory."""
+    current = start.resolve()
+    while True:
+        if (current / "pyproject.toml").exists():
+            return current
+        parent = current.parent
+        if parent == current:  # reached filesystem root
+            break
+        current = parent
+    return start
+
+
 def _default_state_dir() -> Path:
-    return Path.cwd() / ".va_state"
+    return _find_project_root(Path.cwd()) / ".va_state"
 
 
 def _optional_env(name: str) -> str | None:
