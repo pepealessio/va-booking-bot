@@ -266,18 +266,19 @@ def _pick_day() -> int:
     return DOW_NAMES.index(sel)
 
 
-def _fetch_candidate_classes(client: VirginActiveClient, club: str | None, course: str | None, day_of_week: int) -> tuple[list[str], list]:
+def _fetch_candidate_classes(client: VirginActiveClient, club: str | None, course: str | None, day_of_week: int) -> list:
     today = datetime.now(UTC).date()
-    candidate_dates: list[str] = []
+    candidate_date = None
     for d in range(1, 14):
         dt = today + timedelta(days=d)
         if dt.weekday() == day_of_week:
-            candidate_dates.append(dt.strftime("%Y-%m-%d"))
-    if not candidate_dates:
+            candidate_date = dt.strftime("%Y-%m-%d")
+            break
+    if not candidate_date:
         raise VAError("No matching date in next 14 days.")
 
     filters: dict[str, str | None] = {
-        "club": club, "course": course, "date": candidate_dates[0],
+        "club": club, "course": course, "date": candidate_date,
         "trainer": None, "target": None,
     }
     try:
@@ -286,8 +287,8 @@ def _fetch_candidate_classes(client: VirginActiveClient, club: str | None, cours
         classes = client.list_classes(filters, use_auth=False)
 
     if not classes:
-        raise VAError(f"No classes found for {club} on {candidate_dates[0]}. Try different filters.")
-    return candidate_dates, classes
+        raise VAError(f"No classes found for {club} on {candidate_date}. Try different filters.")
+    return classes
 
 
 def _pick_class(classes) -> tuple:
@@ -358,7 +359,7 @@ def interactive_add(
     club = _pick_club(client)
     course = _pick_course(client)
     day_of_week = _pick_day()
-    candidate_dates, classes = _fetch_candidate_classes(client, club, course, day_of_week)
+    classes = _fetch_candidate_classes(client, club, course, day_of_week)
 
     selected = _pick_class(classes)
     if not selected.start_time:
