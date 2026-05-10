@@ -207,7 +207,7 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             print("No booking entries in crontab.")
             return {"status": "empty"}
         if cmd == "remove":
-            return cmd_remove(entry_id=getattr(args, "entry_id", None), force=getattr(args, "force", False))
+            return cmd_remove(entry_id=getattr(args, "entry_id", None))
         raise VAError("Unknown automate subcommand.")
     raise VAError("Unknown command.")
 

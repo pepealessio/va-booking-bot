@@ -238,45 +238,35 @@ def worker_book_recurring(
 # ── Interactive add flow → print cron lines ────────────────────────
 
 
-def interactive_add(
-    client: VirginActiveClient,
-    *,
-    install: bool = False,
-    raw: bool = False,
-) -> dict[str, Any]:
-    """Walk through selection and print/install cron entries."""
-
+def _pick_club(client: VirginActiveClient) -> str:
     clubs = client.get_calendar_filters().clubs
     if not clubs:
         raise VAError("No clubs found.")
-    club_label = questionary.select(
-        "Select club:",
-        choices=[c.label for c in clubs],
-    ).ask()
-    if not club_label:
+    label = questionary.select("Select club:", choices=[c.label for c in clubs]).ask()
+    if not label:
         raise VAError("Aborted: no club selected")
+    return label
 
+
+def _pick_course(client: VirginActiveClient) -> str | None:
     courses = client.get_calendar_filters().courses
-    course_label = None
-    if courses:
-        choices = ["(any)"] + [c.label for c in courses]
-        course_label = questionary.select(
-            "Select course:",
-            choices=choices,
-        ).ask()
-        if not course_label:
-            raise VAError("Aborted")
-        if course_label == "(any)":
-            course_label = None
-
-    day_sel = questionary.select(
-        "Select day of week:",
-        choices=DOW_NAMES,
-    ).ask()
-    if not day_sel:
+    if not courses:
+        return None
+    choices = ["(any)"] + [c.label for c in courses]
+    label = questionary.select("Select course:", choices=choices).ask()
+    if not label:
         raise VAError("Aborted")
-    day_of_week = DOW_NAMES.index(day_sel)
+    return None if label == "(any)" else label
 
+
+def _pick_day() -> int:
+    sel = questionary.select("Select day of week:", choices=DOW_NAMES).ask()
+    if not sel:
+        raise VAError("Aborted")
+    return DOW_NAMES.index(sel)
+
+
+def _fetch_candidate_classes(client: VirginActiveClient, club: str | None, course: str | None, day_of_week: int) -> tuple[list[str], list]:
     today = datetime.now(UTC).date()
     candidate_dates: list[str] = []
     for d in range(1, 14):
@@ -287,11 +277,8 @@ def interactive_add(
         raise VAError("No matching date in next 14 days.")
 
     filters: dict[str, str | None] = {
-        "club": club_label,
-        "course": course_label,
-        "date": candidate_dates[0],
-        "trainer": None,
-        "target": None,
+        "club": club, "course": course, "date": candidate_dates[0],
+        "trainer": None, "target": None,
     }
     try:
         classes = client.list_classes(filters, use_auth=True, approve=lambda _: True)
@@ -299,11 +286,11 @@ def interactive_add(
         classes = client.list_classes(filters, use_auth=False)
 
     if not classes:
-        raise VAError(
-            f"No classes found for {club_label} on {candidate_dates[0]}. "
-            "Try different filters."
-        )
+        raise VAError(f"No classes found for {club} on {candidate_dates[0]}. Try different filters.")
+    return candidate_dates, classes
 
+
+def _pick_class(classes) -> tuple:
     options = []
     for i, c in enumerate(classes):
         lbl = f"{c.start_time or '?'} | {c.title}"
@@ -312,102 +299,102 @@ def interactive_add(
         if c.room:
             lbl += f" — {c.room}"
         options.append({"name": lbl, "value": i})
-
-    sel_idx = questionary.select(
-        "Select a class:",
-        choices=options,
-    ).ask()
-    if sel_idx is None:
+    sel = questionary.select("Select a class:", choices=options).ask()
+    if sel is None:
         raise VAError("Aborted")
+    return classes[sel]
 
-    selected = classes[sel_idx]
+
+def _query_retry_settings() -> tuple[int, int, bool]:
+    max_retries_text = questionary.text("Max retries (default 10):").ask()
+    if max_retries_text is None:
+        raise VAError("Aborted by user")
+    max_retries_val = int(max_retries_text) if max_retries_text else 10
+
+    interval_text = questionary.text("Retry interval in seconds (default 60):").ask()
+    if interval_text is None:
+        raise VAError("Aborted by user")
+    interval_val = int(interval_text) if interval_text else 60
+
+    do_install = questionary.confirm("Install into crontab?", default=True).ask()
+    if do_install is None:
+        raise VAError("Aborted by user")
+    return max_retries_val, interval_val, do_install
+
+
+def _print_cron_result(
+    lines: list[str], entry_id: str, *, raw: bool, do_install: bool
+) -> None:
+    cron_content = "\n".join(lines) + "\n"
+
+    if raw:
+        print(cron_content, end="")
+        return
+
+    if do_install:
+        existing = _read_crontab()
+        new_content = (existing + "\n" + cron_content) if existing else cron_content
+        _write_crontab(new_content)
+        print("Cron entries installed successfully!")
+    else:
+        print("Copy these lines into your crontab (`crontab -e`):")
+
+    print()
+    for line in lines:
+        print(f"  {line}")
+    print()
+    print(f"  Listing entries:    va automate list")
+    print(f"  Remove this entry:  va automate remove {entry_id}")
+
+
+def interactive_add(
+    client: VirginActiveClient,
+    *,
+    install: bool = False,
+    raw: bool = False,
+) -> dict[str, Any]:
+    """Walk through selection and print/install cron entries."""
+
+    club = _pick_club(client)
+    course = _pick_course(client)
+    day_of_week = _pick_day()
+    candidate_dates, classes = _fetch_candidate_classes(client, club, course, day_of_week)
+
+    selected = _pick_class(classes)
     if not selected.start_time:
         raise VAError("Selected class has no valid time")
-
     time_str = selected.start_time
 
     if not raw:
-        preview = (
-            f"  Club:    {club_label}\n"
-            f"  Course:  {course_label or '(any)'}\n"
+        print(
+            f"  Club:    {club}\n"
+            f"  Course:  {course or '(any)'}\n"
             f"  Day:     {DOW_NAMES[day_of_week]}\n"
             f"  Time:    {time_str}\n"
             f"  Trainer: {selected.trainer or '-'}\n"
             f"  Room:    {selected.room or '-'}"
         )
-        print(preview)
 
     if raw:
-        max_retries_val = 10
-        retry_interval_val = 60
+        max_retries = 10
+        retry_interval = 60
         do_install = False
     elif install:
-        max_retries_val = 10
-        retry_interval_val = 60
+        max_retries = 10
+        retry_interval = 60
         do_install = True
     else:
-        max_retries_text = questionary.text(
-            "Max retries (default 10):",
-        ).ask()
-        if max_retries_text is None:
-            raise VAError("Aborted by user")
-        max_retries_val = int(max_retries_text) if max_retries_text else 10
-
-        retry_interval_text = questionary.text(
-            "Retry interval in seconds (default 60):",
-        ).ask()
-        if retry_interval_text is None:
-            raise VAError("Aborted by user")
-        retry_interval_val = int(retry_interval_text) if retry_interval_text else 60
-
-        do_install = questionary.confirm(
-            "Install into crontab?",
-            default=True,
-        ).ask()
-        if do_install is None:
-            raise VAError("Aborted by user")
+        max_retries, retry_interval, do_install = _query_retry_settings()
 
     entry_id = _generate_id()
     lines = build_cron_entry(
-        club=club_label,
-        course=course_label,
-        day_of_week=day_of_week,
-        time_str=time_str,
-        max_retries=max_retries_val,
-        retry_interval=retry_interval_val,
-        entry_id=entry_id,
-        va_bin=sys.argv[0],
+        club=club, course=course, day_of_week=day_of_week, time_str=time_str,
+        max_retries=max_retries, retry_interval=retry_interval,
+        entry_id=entry_id, va_bin=sys.argv[0],
     )
 
-    cron_content = "\n".join(lines) + "\n"
-
-    if raw:
-        print(cron_content, end="")
-    elif not do_install:
-        print()
-        print("Copy these lines into your crontab (`crontab -e`):")
-        print()
-        for line in lines:
-            print(f"  {line}")
-        print()
-        print(f"  Listing entries:    va automate list")
-        print(f"  Remove this entry:  va automate remove {entry_id}")
-    else:
-        existing = _read_crontab()
-        new_content = (existing + "\n" + cron_content) if existing else cron_content
-        _write_crontab(new_content)
-        print()
-        print("Cron entries installed successfully!")
-        print()
-        for line in lines:
-            print(f"  {line}")
-        print()
-        print(f"  Listing entries:    va automate list")
-        print(f"  Remove this entry:  va automate remove {entry_id}")
-
-    return {
-        "status": "success",
-    }
+    _print_cron_result(lines, entry_id, raw=raw, do_install=do_install)
+    return {"status": "success"}
 
 
 # ── CLI entry points ──────────────────────────────────────────────
@@ -514,19 +501,22 @@ def _cronline_to_dict(line: str) -> dict[str, str] | None:
     }
 
 
-def cmd_list() -> Any:
-    """Return list of booking entries managed by the va bot."""
-    content = _read_crontab()
-    lines = content.splitlines()
+def _crontab_entries(content: str) -> list[dict[str, str]]:
+    """Parse crontab *content* and return all va-automate book entries."""
     entries: list[dict[str, str]] = []
-    cron_lines: list[str] = []
-    for line in lines:
+    for line in content.splitlines():
         if VA_MARKER_PREFIX in line:
             entry = _cronline_to_dict(line)
             if entry:
                 entries.append(entry)
-                cron_lines.append(line)
+    return entries
 
+
+def cmd_list() -> Any:
+    """Return list of booking entries managed by the va bot."""
+    content = _read_crontab()
+    entries = _crontab_entries(content)
+    cron_lines = [line for line in content.splitlines() if VA_MARKER_PREFIX in line and "--recurring" in line]
     return {
         "total": len(entries),
         "entries": entries,
@@ -534,10 +524,10 @@ def cmd_list() -> Any:
     }
 
 
-def cmd_remove(*, entry_id: str | None = None, force: bool = False) -> Any:
+def cmd_remove(*, entry_id: str | None = None) -> Any:
     """Remove a booking entry from crontab (interactive or by ID)."""
-    result = cmd_list()
-    entries = result["entries"]
+    content = _read_crontab()
+    entries = _crontab_entries(content)
     if not entries:
         raise VAError("No booking entries found in crontab")
 
@@ -546,22 +536,15 @@ def cmd_remove(*, entry_id: str | None = None, force: bool = False) -> Any:
             f"{e['id']}: {e['club']} — {e['course'] or 'any'} — {e['day']} {e['time']}"
             for e in entries
         ]
-        choice = questionary.select(
-            "Select entry to remove:",
-            choices=choices,
-        ).ask()
+        choice = questionary.select("Select entry to remove:", choices=choices).ask()
         if not choice:
             raise VAError("Aborted")
         entry_id = choice.split(":")[0].strip()
 
     if _do_remove(entry_id):
         print(f"Removed entry: {entry_id}")
-        return {
-            "status": "success",
-            "removed": entry_id,
-        }
-    else:
-        raise VAError(f"No booking entry with id={entry_id}")
+        return {"status": "success", "removed": entry_id}
+    raise VAError(f"No booking entry with id={entry_id}")
 
 
 def _do_remove(entry_id: str) -> bool:
@@ -569,18 +552,11 @@ def _do_remove(entry_id: str) -> bool:
     content = _read_crontab()
     if not content:
         return False
-
     target = f"{VA_MARKER_PREFIX}{entry_id}"
     lines = content.splitlines()
-    new_lines = [
-        line for line in lines
-        if not (line.strip() and target in line)
-    ]
-    removed_count = len(lines) - len(new_lines)
-    if removed_count == 0:
+    new_lines = [line for line in lines if not (line.strip() and target in line)]
+    if len(new_lines) == len(lines):
         return False
-
-    content = "\n".join(new_lines)
-    content = re.sub(r"\n{3,}", "\n\n", content).rstrip("\n") + "\n" if content else ""
-    _write_crontab(content)
+    new_content = re.sub(r"\n{3,}", "\n\n", "\n".join(new_lines)).rstrip("\n") + "\n" if new_lines else ""
+    _write_crontab(new_content)
     return True
