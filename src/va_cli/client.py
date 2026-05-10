@@ -137,7 +137,10 @@ class VirginActiveClient:
             "inspect your authenticated Virgin Active session",
             approve,
         )
-        response = self.auth_http.get(self._require_url(self.config.login_status_url, "VA_LOGIN_STATUS_URL"))
+        login_url = self.config.login_status_url
+        if not login_url:
+            raise VAError("VA_LOGIN_STATUS_URL is not configured.")
+        response = self.auth_http.get(login_url)
         self._log_response(response, "GET login status")
         response.raise_for_status()
         payload = self._decode_payload(response)
@@ -161,6 +164,26 @@ class VirginActiveClient:
         payload = self._fetch_calendar_payload(filters, use_auth=use_auth, approve=approve)
         return payload["classes"]
 
+    def _integration_request(
+        self,
+        endpoint: str,
+        result_key: str,
+        token_or_booking_id: str,
+        *,
+        center: str | None = None,
+        approve: ApprovalCallback | None = None,
+    ) -> dict[str, Any]:
+        self._require_approved_session(f"{endpoint.lower()} a Virgin Active class", approve)
+        self._ensure_site_session()
+        booking_id, booking_center = self._split_booking_token(token_or_booking_id, center)
+        response = self.auth_http.get(
+            f"{self.config.integration_base_url}/{endpoint}",
+            params={"bookingId": booking_id, "bookingCenter": booking_center},
+        )
+        self._log_response(response, f"GET {endpoint.lower()}")
+        response.raise_for_status()
+        return self._normalize_integration_payload(self._decode_payload(response), result_key)
+
     def book(
         self,
         token_or_booking_id: str,
@@ -168,18 +191,7 @@ class VirginActiveClient:
         center: str | None = None,
         approve: ApprovalCallback | None = None,
     ) -> dict[str, Any]:
-        self._require_approved_session("book a Virgin Active class", approve)
-        self._ensure_site_session()
-        booking_id, booking_center = self._split_booking_token(token_or_booking_id, center)
-        url = f"{self.config.integration_base_url}/BookClass"
-        response = self.auth_http.get(
-            url,
-            params={"bookingId": booking_id, "bookingCenter": booking_center},
-        )
-        self._log_response(response, "GET book class")
-        response.raise_for_status()
-        payload = self._decode_payload(response)
-        return self._normalize_integration_payload(payload, "BookClassResult")
+        return self._integration_request("BookClass", "BookClassResult", token_or_booking_id, center=center, approve=approve)
 
     def cancel(
         self,
@@ -188,18 +200,7 @@ class VirginActiveClient:
         center: str | None = None,
         approve: ApprovalCallback | None = None,
     ) -> dict[str, Any]:
-        self._require_approved_session("cancel a Virgin Active class booking", approve)
-        self._ensure_site_session()
-        booking_id, booking_center = self._split_booking_token(token_or_booking_id, center)
-        url = f"{self.config.integration_base_url}/UnbookClass"
-        response = self.auth_http.get(
-            url,
-            params={"bookingId": booking_id, "bookingCenter": booking_center},
-        )
-        self._log_response(response, "GET unbook class")
-        response.raise_for_status()
-        payload = self._decode_payload(response)
-        return self._normalize_integration_payload(payload, "UnbookClassResult")
+        return self._integration_request("UnbookClass", "UnbookClassResult", token_or_booking_id, center=center, approve=approve)
 
     def _fetch_calendar_payload(
         self,
@@ -346,7 +347,9 @@ class VirginActiveClient:
             )
 
     def _ensure_site_session(self) -> None:
-        login_status_url = self._require_url(self.config.login_status_url, "VA_LOGIN_STATUS_URL")
+        login_status_url = self.config.login_status_url
+        if not login_status_url:
+            raise VAError("VA_LOGIN_STATUS_URL is not configured.")
         status_response = self.auth_http.get(login_status_url)
         self._log_response(status_response, "GET login status")
         status_response.raise_for_status()
@@ -420,11 +423,6 @@ class VirginActiveClient:
                         cls.status = "not_yet_open"
                 except ValueError:
                     continue
-
-    def _require_url(self, value: str | None, env_name: str) -> str:
-        if not value:
-            raise VAError(f"{env_name} is not configured.")
-        return value
 
     def _decode_payload(self, response: httpx.Response) -> Any:
         try:
