@@ -204,6 +204,8 @@ def worker_book_recurring(
         notify_cfg = None
     notifier = from_config(notify_cfg)
 
+    last_error: str | None = None
+
     for attempt in range(1, max_retries + 1):
         logger.info("attempt %d/%d", attempt, max_retries)
         try:
@@ -218,25 +220,29 @@ def worker_book_recurring(
                 )
                 return {"status": "success", "class": class_desc, "attempts": attempt}
             else:
+                last_error = f"status {status_code}"
                 logger.warning("non-200 status: %s", result)
                 time.sleep(retry_interval)
 
         except VAError as e:
+            last_error = str(e)
             logger.error("VAError on attempt %d: %s", attempt, e)
             if attempt < max_retries:
                 time.sleep(retry_interval)
 
         except Exception as e:
+            last_error = str(e)
             logger.error("error on attempt %d: %s", attempt, e)
             if attempt < max_retries:
                 time.sleep(retry_interval)
 
+    detail = f" — {last_error}" if last_error else ""
     logger.error("FAILED after %d attempts for %s", max_retries, class_desc)
     notifier.send(
         "error",
-        f"Booking failed: **{class_desc}** after {max_retries} attempts",
+        f"Booking failed: **{class_desc}** after {max_retries} attempts{detail}",
     )
-    raise VAError(f"Failed to book {class_desc} after {max_retries} attempts")
+    raise VAError(f"Failed to book {class_desc} after {max_retries} attempts{detail}")
 
 
 # ── Interactive add flow → print cron lines ────────────────────────
