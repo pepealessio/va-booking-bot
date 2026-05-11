@@ -324,26 +324,17 @@ class CmdRemoveTests(unittest.TestCase):
             "00 18 * * 6 va --dangerously-approve-token book $(cat /tmp/va_booking_abc12345)"
             " --retry 10 --retry-interval 60 # va-automate:abc12345\n"
         )
-        written: list[str] = []
+        result = _do_remove("abc12345", crontab)
+        self.assertIsNotNone(result)
+        self.assertNotIn("abc12345", result)
 
-        def _fake_write(content: str) -> None:
-            written.append(content)
+    def test_not_found_returns_none(self) -> None:
+        result = _do_remove("nonexistent", "00 00 * * * echo hello\n")
+        self.assertIsNone(result)
 
-        with patch("va_cli.automate._read_crontab", return_value=crontab):
-            with patch("va_cli.automate._write_crontab", side_effect=_fake_write):
-                _do_remove("abc12345")
-        self.assertEqual(len(written), 1)
-        self.assertNotIn("abc12345", written[0])
-
-    def test_not_found_returns_false(self) -> None:
-        with patch("va_cli.automate._read_crontab", return_value="00 00 * * * echo hello"):
-            result = _do_remove("nonexistent")
-        self.assertFalse(result)
-
-    def test_empty_crontab_returns_false(self) -> None:
-        with patch("va_cli.automate._read_crontab", return_value=""):
-            result = _do_remove("nonexistent")
-        self.assertFalse(result)
+    def test_empty_crontab_returns_none(self) -> None:
+        result = _do_remove("nonexistent", "")
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

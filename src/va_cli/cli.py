@@ -63,9 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     auto = subparsers.add_parser("automate", help="Recurring booking automation helpers.")
     auto_sub = auto.add_subparsers(dest="automate_command", required=True)
 
-    add_parser = auto_sub.add_parser("add", help="Interactively select a class and create cron entries.")
-    add_parser.add_argument("--install", action="store_true", help="Automatically install cron entries into crontab.")
-    add_parser.add_argument("--raw", action="store_true", help="Print only cron lines (no commentary), suitable for piping to crontab.")
+    add_parser = auto_sub.add_parser("add", help="Interactively select a class and print cron lines to stdout.")
 
     list_parser = auto_sub.add_parser("list", help="List recurring booking entries from crontab.")
     list_parser.add_argument("--json", action="store_true", dest="list_as_json")
@@ -190,9 +188,13 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
     if args.command == "automate":
         cmd = getattr(args, "automate_command", None)
         if cmd == "add":
-            return cmd_add(client, install=getattr(args, "install", False), raw=getattr(args, "raw", False))
+            cmd_add(client)
+            return None
         if cmd == "list":
-            result = cmd_list()
+            content = None
+            if not sys.stdin.isatty():
+                content = sys.stdin.read()
+            result = cmd_list(content)
             if getattr(args, "list_as_json", False) or args.as_json:
                 return result
             if getattr(args, "raw", False):
@@ -202,12 +204,18 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             print("No booking entries in crontab.")
             return {"status": "empty"}
         if cmd == "remove":
-            return cmd_remove(entry_id=getattr(args, "entry_id", None))
+            content = None
+            if not sys.stdin.isatty():
+                content = sys.stdin.read()
+            cmd_remove(content, entry_id=getattr(args, "entry_id", None))
+            return None
         raise VAError("Unknown automate subcommand.")
     raise VAError("Unknown command.")
 
 
 def render(payload: Any, *, as_json: bool) -> None:
+    if payload is None:
+        return
     if as_json:
         print(json.dumps(_json_ready(payload), indent=2, sort_keys=True))
         return

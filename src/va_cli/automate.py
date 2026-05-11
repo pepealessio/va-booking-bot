@@ -258,56 +258,13 @@ def _pick_class(classes) -> tuple:
     return classes[sel]
 
 
-def _query_retry_settings() -> tuple[int, int, bool]:
-    max_retries_text = questionary.text("Max retries (default 10):").ask()
-    if max_retries_text is None:
-        raise VAError("Aborted by user")
-    max_retries_val = int(max_retries_text) if max_retries_text else 10
+def interactive_add(client: VirginActiveClient) -> None:
+    """Walk through selection and print cron lines to stdout.
 
-    interval_text = questionary.text("Retry interval in seconds (default 60):").ask()
-    if interval_text is None:
-        raise VAError("Aborted by user")
-    interval_val = int(interval_text) if interval_text else 60
-
-    do_install = questionary.confirm("Install into crontab?", default=True).ask()
-    if do_install is None:
-        raise VAError("Aborted by user")
-    return max_retries_val, interval_val, do_install
-
-
-def _print_cron_result(
-    lines: list[str], entry_id: str, *, raw: bool, do_install: bool
-) -> None:
-    cron_content = "\n".join(lines) + "\n"
-
-    if raw:
-        print(cron_content, end="")
-        return
-
-    if do_install:
-        existing = _read_crontab()
-        new_content = (existing + "\n" + cron_content) if existing else cron_content
-        _write_crontab(new_content)
-        print("Cron entries installed successfully!")
-    else:
-        print("Copy these lines into your crontab (`crontab -e`):")
-
-    print()
-    for line in lines:
-        print(f"  {line}")
-    print()
-    print(f"  Listing entries:    va automate list")
-    print(f"  Remove this entry:  va automate remove {entry_id}")
-
-
-def interactive_add(
-    client: VirginActiveClient,
-    *,
-    install: bool = False,
-    raw: bool = False,
-) -> dict[str, Any]:
-    """Walk through selection and print/install cron entries."""
-
+    Commentary (summary, usage tips) goes to stderr so the cron lines
+    on stdout remain clean for piping to ``crontab -``.
+    Returns ``None`` — the caller should not render anything extra.
+    """
     club = _pick_club(client)
     course = _pick_course(client)
     day_of_week = _pick_day()
@@ -318,50 +275,46 @@ def interactive_add(
         raise VAError("Selected class has no valid time")
     time_str = selected.start_time
 
-    if not raw:
-        print(
-            f"  Club:    {club}\n"
-            f"  Course:  {course or '(any)'}\n"
-            f"  Day:     {DOW_NAMES[day_of_week]}\n"
-            f"  Time:    {time_str}\n"
-            f"  Trainer: {selected.trainer or '-'}\n"
-            f"  Room:    {selected.room or '-'}"
-        )
-
-    if raw:
-        max_retries = 10
-        retry_interval = 60
-        do_install = False
-    elif install:
-        max_retries = 10
-        retry_interval = 60
-        do_install = True
-    else:
-        max_retries, retry_interval, do_install = _query_retry_settings()
+    print(
+        f"  Club:    {club}\n"
+        f"  Course:  {course or '(any)'}\n"
+        f"  Day:     {DOW_NAMES[day_of_week]}\n"
+        f"  Time:    {time_str}\n"
+        f"  Trainer: {selected.trainer or '-'}\n"
+        f"  Room:    {selected.room or '-'}",
+        file=sys.stderr,
+    )
 
     entry_id = _generate_id()
     lines = build_cron_entry(
         club=club, course=course, day_of_week=day_of_week, time_str=time_str,
-        max_retries=max_retries, retry_interval=retry_interval,
         entry_id=entry_id, va_bin=sys.argv[0],
     )
 
-    _print_cron_result(lines, entry_id, raw=raw, do_install=do_install)
-    return {"status": "success"}
+    for line in lines:
+        print(line)
+
+    print(file=sys.stderr)
+    print("Install these cron lines:", file=sys.stderr)
+    print(f"  {sys.argv[0]} automate add | crontab -", file=sys.stderr)
+    print("List entries:", file=sys.stderr)
+    print(f"  crontab -l | {sys.argv[0]} automate list", file=sys.stderr)
+    print("Remove this entry:", file=sys.stderr)
+    print(f"  crontab -l | {sys.argv[0]} automate remove {entry_id} | crontab -", file=sys.stderr)
 
 
 # ── CLI entry points ──────────────────────────────────────────────
 
 
-def cmd_add(client: VirginActiveClient, *, install: bool = False, raw: bool = False) -> Any:
+def cmd_add(client: VirginActiveClient) -> None:
     if not client.has_saved_session():
-        if not raw:
-            print("No saved session. Logging in first...")
+        print("No saved session. Logging in first...", file=sys.stderr)
         try:
             client.login()
         except VAError as e:
-            return {"status": "error", "error": str(e)}
-    return interactive_add(client, install=install, raw=raw)
+            print(f"error: {e}", file=sys.stderr)
+            return
+    interactive_add(client)
 
 
 # ── List / remove from crontab ────────────────────────────────────
@@ -375,15 +328,6 @@ def _read_crontab() -> str:
     if result.returncode != 0:
         return ""
     return result.stdout
-
-
-def _write_crontab(content: str) -> None:
-    """Write content to the user's crontab."""
-    proc = subprocess.run(
-        ["crontab", "-"], input=content, capture_output=True, text=True
-    )
-    if proc.returncode != 0:
-        raise VAError(f"Failed to write crontab: {proc.stderr.strip()}")
 
 
 def _join_quoted(parts: list[str], idx: int) -> str:
@@ -481,9 +425,10 @@ def _crontab_entries(content: str) -> list[dict[str, str]]:
     return entries
 
 
-def cmd_list() -> Any:
-    """Return list of booking entries managed by the va bot."""
-    content = _read_crontab()
+def cmd_list(content: str | None = None) -> dict[str, Any]:
+    """Return list of booking entries from crontab *content* (or read via ``crontab -l``)."""
+    if content is None:
+        content = _read_crontab()
     entries = _crontab_entries(content)
     cron_lines = [line for line in content.splitlines() if VA_MARKER_PREFIX in line and "$(cat /tmp/va_booking_" in line]
     return {
@@ -493,9 +438,16 @@ def cmd_list() -> Any:
     }
 
 
-def cmd_remove(*, entry_id: str | None = None) -> Any:
-    """Remove a booking entry from crontab (interactive or by ID)."""
-    content = _read_crontab()
+def cmd_remove(content: str | None = None, *, entry_id: str | None = None) -> None:
+    """Remove a booking entry and print the modified crontab to stdout.
+
+    When *content* is ``None`` it reads via ``crontab -l``.
+    The modified crontab goes to stdout; the confirmation message goes to
+    stderr.  Returns ``None`` — the caller should not render anything
+    extra.
+    """
+    if content is None:
+        content = _read_crontab()
     entries = _crontab_entries(content)
     if not entries:
         raise VAError("No booking entries found in crontab")
@@ -510,22 +462,22 @@ def cmd_remove(*, entry_id: str | None = None) -> Any:
             raise VAError("Aborted")
         entry_id = choice.split(":")[0].strip()
 
-    if _do_remove(entry_id):
-        print(f"Removed entry: {entry_id}")
-        return {"status": "success", "removed": entry_id}
-    raise VAError(f"No booking entry with id={entry_id}")
+    new_content = _do_remove(entry_id, content)
+    if new_content is None:
+        raise VAError(f"No booking entry with id={entry_id}")
+
+    print(new_content, end="")
+    print(f"  Removed entry: {entry_id}", file=sys.stderr)
 
 
-def _do_remove(entry_id: str) -> bool:
-    """Remove booking entry with the given ID from crontab. Returns True if removed."""
-    content = _read_crontab()
+def _do_remove(entry_id: str, content: str) -> str | None:
+    """Return *content* with all lines matching *entry_id* removed, or ``None`` if not found."""
     if not content:
-        return False
+        return None
     target = f"{VA_MARKER_PREFIX}{entry_id}"
     lines = content.splitlines()
     new_lines = [line for line in lines if not (line.strip() and target in line)]
     if len(new_lines) == len(lines):
-        return False
-    new_content = re.sub(r"\n{3,}", "\n\n", "\n".join(new_lines)).rstrip("\n") + "\n" if new_lines else ""
-    _write_crontab(new_content)
-    return True
+        return None
+    result = re.sub(r"\n{3,}", "\n\n", "\n".join(new_lines)).rstrip("\n") + "\n" if new_lines else ""
+    return result

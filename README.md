@@ -21,9 +21,9 @@ The project talks directly to the Virgin Active Italy web endpoints used by the 
 
 ### `va automate` — recurring booking automation
 
-- interactive `va automate add` with `--install` to write crontab directly or `--raw` for piping
-- `va automate list` with table, JSON, and `--raw` modes
-- `va automate remove <id>` for non-interactive entry removal
+- `va automate add` prints cron lines to stdout — pipe to crontab yourself
+- `crontab -l | va automate list` with table, JSON, and `--raw` modes
+- `crontab -l | va automate remove <id> | crontab -` — never writes your crontab directly
 - `va book --retry` retry loop with Telegram notification on success/failure
 - find/login cron entry resolves class token 5 min before the bell via `va --json classes`
 - book cron entry reads pre-resolved token for zero-delay booking
@@ -254,35 +254,22 @@ The `automate` subcommand manages cron entries for recurring class bookings. No 
 
 #### `va automate add`
 
-Interactively select a class and create cron entries:
+Interactively select a class and print cron lines to stdout:
 
 ```bash
-va automate add
+va automate add | crontab -
 ```
 
-This walks you through selecting:
+The command walks you through selecting:
 
 1. Club
 2. Course (or any)
 3. Day of week (Mon–Sun)
 4. Specific class (shown for the nearest matching date)
-5. Retry settings (max retries, interval in seconds — default 10 retries, 60 s)
 
-**Install directly into crontab:**
+Commentary (club, course, install tips) goes to **stderr**, so only the raw cron lines reach **stdout** — clean for piping.
 
-```bash
-va automate add --install
-```
-
-**Pipe to crontab (for scripting):**
-
-```bash
-va automate add --raw | crontab -
-```
-
-`--raw` prints only the cron lines with no commentary, making it pipe-friendly.
-
-At the end it prints three cron lines (unless `--install` or `--raw` is used). Example for a Monday 18:00 Yoga class:
+Example output for a Monday 18:00 Yoga class (to stdout):
 
 ```
 # Roma EUR — Yoga Calm — Monday 18:00 # va-automate:abc12345
@@ -294,23 +281,39 @@ The **find/login line** runs 5 minutes before the book line (both 48 h before cl
 
 The **book line** reads the pre-resolved token from the tmp file and attempts to book with retry. The retry interval is short (seconds) because the class resolution is already done — only the booking call needs to go through.
 
-#### `va automate list`
-
-List recurring booking entries currently in your crontab:
+**Important**: `va automate add` **never** touches your crontab. You own the pipe:
 
 ```bash
-va automate list               # table view
-va automate list --json         # JSON output
-va automate list --raw          # raw cron lines only (pipe-friendly)
+# Install (appends to existing crontab):
+(crontab -l; va automate add) | crontab -
 ```
+
+#### `va automate list`
+
+Read your crontab and list entries:
+
+```bash
+crontab -l | va automate list         # table view
+crontab -l | va automate list --json   # JSON output
+crontab -l | va automate list --raw    # raw cron lines only (pipe-friendly)
+```
+
+The command reads crontab content from stdin when piped, or calls `crontab -l` automatically as a fallback.
 
 #### `va automate remove`
 
-Remove a booking entry from your crontab. Pass the entry ID non-interactively, or omit it for interactive selection:
+Remove a booking entry. Pass the entry ID non-interactively, or omit it for interactive selection:
 
 ```bash
-va automate remove abc12345    # remove by ID (non-interactive)
-va automate remove              # interactive selection
+crontab -l | va automate remove abc12345 | crontab -   # remove by ID, install result
+crontab -l | va automate remove          # interactive selection, prints to stdout
+```
+
+The command reads crontab content from stdin when piped (or calls `crontab -l` as fallback), removes the matching lines, and prints the modified crontab to stdout. You control where it goes — typically back to crontab via `| crontab -`.
+
+```bash
+# Preview the change without installing:
+crontab -l | va automate remove abc12345 | less
 ```
 
 #### `va book <token> --retry`
