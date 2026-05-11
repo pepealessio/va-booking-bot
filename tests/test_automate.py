@@ -13,7 +13,6 @@ from va_cli.automate import (
     build_cron_entry,
     cmd_list,
     compute_cron_times,
-    interactive_add,
     worker_book,
 )
 from va_cli.client import VAError
@@ -87,7 +86,7 @@ class CronEntryTests(unittest.TestCase):
 
 
 # =====================================================================
-# 3. worker_book_recurring tests (6 tests)
+# 3. Worker book with retry (3 tests)
 # =====================================================================
 
 
@@ -132,11 +131,8 @@ class WorkerBookTests(unittest.TestCase):
                 )
 
 
-
-
-
 # =====================================================================
-# 5. CLI integration (5 tests)
+# 4. CLI integration (3 tests)
 # =====================================================================
 
 
@@ -221,7 +217,7 @@ class CliBookTests(unittest.TestCase):
         self.assertEqual(kwargs["retry_interval"], 30)
 
 # =====================================================================
-# 11. Crontab entry ID marker (3 tests)
+# 5. Crontab entry ID marker (3 tests)
 # =====================================================================
 
 
@@ -244,7 +240,7 @@ class CronEntryMarkerTests(unittest.TestCase):
 
 
 # =====================================================================
-# 12. Cronline parser (3 tests)
+# 6. Cronline parser (3 tests)
 # =====================================================================
 
 
@@ -279,7 +275,7 @@ class CronlineParserTests(unittest.TestCase):
 
 
 # =====================================================================
-# 13. List command (2 tests)
+# 7. List command (2 tests)
 # =====================================================================
 
 
@@ -308,7 +304,7 @@ class CmdListTests(unittest.TestCase):
 
 
 # =====================================================================
-# 14. Remove command (2 tests)
+# 8. Remove command (3 tests)
 # =====================================================================
 
 

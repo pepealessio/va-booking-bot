@@ -7,8 +7,6 @@ import subprocess
 import sys
 import time
 from datetime import UTC, datetime, timedelta
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
 from typing import Any
 
 import questionary
@@ -108,23 +106,6 @@ def build_cron_entry(
     )
     comment = "# %s — %s — %s %s %s" % (club, course or "any class", DOW_NAMES[day_of_week], time_str, marker)
     return [comment, login_line, book_line]
-
-
-# ── Logging helper ─────────────────────────────────────────────────
-
-_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
-
-
-def _setup_logger(state_dir: Path) -> logging.Logger:
-    logger = logging.getLogger("va-automate")
-    if logger.handlers:
-        return logger
-    logger.setLevel(logging.DEBUG)
-    log_path = state_dir / "automate.log"
-    handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=3)
-    handler.setFormatter(logging.Formatter(_LOG_FORMAT))
-    logger.addHandler(handler)
-    return logger
 
 
 # ── Worker: book with retry ───────────────────────────────────────
