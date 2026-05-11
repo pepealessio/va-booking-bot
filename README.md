@@ -1,5 +1,11 @@
 # Virgin Active Italy CLI and Booking Bot
 
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python">
+  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
+  <img src="https://img.shields.io/badge/github-pepealessio%2Fva--booking--bot-blue" alt="GitHub">
+</p>
+
 Command-line tools for Virgin Active Italy class discovery, booking, cancellation, and recurring booking automation.
 
 This repository contains one tool:
@@ -32,21 +38,22 @@ The project talks directly to the Virgin Active Italy web endpoints used by the 
 
 ## Important Disclaimer
 
-This project is unofficial and depends on live Virgin Active Italy web behavior. It may stop working if the site changes its markup, auth flow, or booking endpoints.
-
-Use it at your own risk and review the code before running unattended automation with your account.
+> This project is **unofficial** and depends on live Virgin Active Italy web behavior. It may stop working if the site changes its markup, auth flow, or booking endpoints.
+>
+> Use it at your own risk and review the code before running unattended automation with your account.
 
 ## Installation
 
 ```bash
 python -m venv venv
 venv/bin/pip install -e .
+source venv/bin/activate
 ```
 
-Available command:
+After installation the `va` command is available inside the virtual environment:
 
 ```bash
-venv/bin/va --help
+va --help
 ```
 
 ## Quick Start
@@ -70,27 +77,27 @@ VA_PASSWORD=your-password
 ### 2. Log in
 
 ```bash
-venv/bin/va login
+va login
 ```
 
 Or save credentials to the keyring:
 
 ```bash
-venv/bin/va login --user you@example.com --passwd secret --save
+va login --user you@example.com --passwd secret --save
 ```
 
 ### 3. Find classes
 
 ```bash
-venv/bin/va classes --club "Roma EUR" --date 2026-03-15
-venv/bin/va classes --club "Roma EUR" --date 2026-03-15 --time 18:00
-venv/bin/va --json classes --club "Roma EUR" --date 2026-03-15
+va classes --club "Roma EUR" --date 2026-03-15
+va classes --club "Roma EUR" --date 2026-03-15 --time 18:00
+va --json classes --club "Roma EUR" --date 2026-03-15
 ```
 
 ### 4. Book a class
 
 ```bash
-venv/bin/va --dangerously-approve-token book 355132c220
+va --dangerously-approve-token book 355132c220
 ```
 
 ## Configuration
@@ -137,15 +144,17 @@ These normally do not need to be changed.
 | `VA_TIMEOUT_SECONDS` | `20` | HTTP timeout used by the internal clients. |
 | `VA_QUEUE_FULL_THRESHOLD` | `15` | Queue length at or above which a class is marked `overbooked` instead of `queue`. |
 | `VA_BOOKING_OPEN_HOURS` | `48` | Hours before a class that bookings open. Classes older than this window showing `full` are remapped to `not_yet_open`. |
+| `VA_NOTIFY_TOKEN` | unset | Telegram Bot API token for push notifications. |
+| `VA_NOTIFY_CHAT_ID` | unset | Your Telegram chat ID for push notifications. |
 
 ## `va` Usage
 
 ### Login
 
 ```bash
-venv/bin/va login
-venv/bin/va login --user you@example.com --passwd secret --save
-venv/bin/va --debug login
+va login
+va login --user you@example.com --passwd secret --save
+va --debug login
 ```
 
 Behavior:
@@ -159,18 +168,18 @@ Behavior:
 Examples:
 
 ```bash
-venv/bin/va classes
-venv/bin/va classes --club "Roma EUR" --date 2026-03-15
-venv/bin/va classes --club "Roma EUR" --date 2026-03-15 --time 18:00
-venv/bin/va classes --club "Roma EUR" --date 2026-03-15 --from-time 18:00 --to-time 20:00
-venv/bin/va classes --no-auth --club "Roma EUR" --date 2026-03-15
-venv/bin/va --json classes --course "Reformer Pilates Align" --date 2026-03-15
+va classes
+va classes --club "Roma EUR" --date 2026-03-15
+va classes --club "Roma EUR" --date 2026-03-15 --time 18:00
+va classes --club "Roma EUR" --date 2026-03-15 --from-time 18:00 --to-time 20:00
+va classes --no-auth --club "Roma EUR" --date 2026-03-15
+va --json classes --course "Reformer Pilates Align" --date 2026-03-15
 ```
 
 Find the next Monday's classes without knowing the exact date:
 
 ```bash
-venv/bin/va --json classes --club "Roma EUR" --course "Yoga Calm" --day 0 --time "18:00"
+va --json classes --club "Roma EUR" --course "Yoga Calm" --day 0 --time "18:00"
 ```
 
 Supported filters:
@@ -226,8 +235,8 @@ Authenticated behavior:
 ### Book and Cancel
 
 ```bash
-venv/bin/va --dangerously-approve-token book 355132c220
-venv/bin/va --dangerously-approve-token cancel 355132c220
+va --dangerously-approve-token book 355132c220
+va --dangerously-approve-token cancel 355132c220
 ```
 
 Notes:
@@ -238,12 +247,12 @@ Notes:
 ### Debug Commands
 
 ```bash
-venv/bin/va debug whoami
-venv/bin/va debug courses
-venv/bin/va debug trainers
-venv/bin/va debug clubs
-venv/bin/va debug targets
-venv/bin/va debug dates --club "Roma EUR"
+va debug whoami
+va debug courses
+va debug trainers
+va debug clubs
+va debug targets
+va debug dates --club "Roma EUR"
 ```
 
 ### Automate — Recurring Booking
@@ -383,8 +392,4 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## Notes
 
-- filter labels like club names are translated into the site's hidden internal values automatically
-- the login flow bridges `shop.virginactive.it` and `www.virginactive.it` automatically
-- the public calendar uses infinite scroll; the client follows pagination automatically
-- the bot assumes the booking token resolved during preflight is still valid at booking time
-- the find/login line resolves the booking token at login time (5 min before book) via `va --json classes` and saves it — the book line reads the file and books with zero class-resolution delay
+- filter labels like club names are translated into the site's hidden internal values automatically — the CLI accepts the visible labels, not the UUIDs
