@@ -246,13 +246,27 @@ def interactive_add(client: VirginActiveClient) -> None:
     on stdout remain clean for piping to ``crontab -``.
     Returns ``None`` — the caller should not render anything extra.
     """
-    club = _pick_club(client)
-    course = _pick_course(client)
-    day_of_week = _pick_day()
-    classes = _fetch_candidate_classes(client, club, course, day_of_week)
+    # questionary writes to sys.stdout; redirect to stderr so that
+    # ``va automate add | crontab -`` works (stdout is the pipe, but
+    # the interactive prompts render on stderr which is still the TTY).
+    club: str | None = None
+    course: str | None = None
+    day_of_week = 0
+    classes: list = []
+    selected = None
 
-    selected = _pick_class(classes)
-    if not selected.start_time:
+    old_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        club = _pick_club(client)
+        course = _pick_course(client)
+        day_of_week = _pick_day()
+        classes = _fetch_candidate_classes(client, club, course, day_of_week)
+        selected = _pick_class(classes)
+    finally:
+        sys.stdout = old_stdout
+
+    if not selected or not selected.start_time:
         raise VAError("Selected class has no valid time")
     time_str = selected.start_time
 
