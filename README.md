@@ -166,8 +166,6 @@ venv/bin/va classes --club "Roma EUR" --date 2026-03-15 --from-time 18:00 --to-t
 venv/bin/va classes --no-auth --club "Roma EUR" --date 2026-03-15
 venv/bin/va --json classes --course "Reformer Pilates Align" --date 2026-03-15
 ```
-venv/bin/va --json classes --course "Reformer Pilates Align" --date 2026-03-15
-```
 
 Find the next Monday's classes without knowing the exact date:
 
