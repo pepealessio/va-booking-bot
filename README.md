@@ -1,7 +1,7 @@
 # Virgin Active Italy CLI and Booking Bot
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python">
+  <img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
   <img src="https://img.shields.io/badge/github-pepealessio%2Fva--booking--bot-blue" alt="GitHub">
 </p>
