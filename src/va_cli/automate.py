@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import random
 import re
 import subprocess
@@ -80,18 +79,32 @@ def build_cron_entry(
     va_bin: str = "va",
     entry_id: str | None = None,
 ) -> list[str]:
-    """Return three cron lines (comment + login + book) as strings for copy-paste."""
+    """Return three cron lines (comment + find/login + book) as strings for copy-paste.
+
+    The find/login line resolves the class token at login time and writes it
+    to ``/tmp/va_booking_<entry_id>``.  The book line reads that file so the
+    booking call has a virtually zero-delay class resolution at the bell.
+    """
     if entry_id is None:
         entry_id = _generate_id()
     cron = compute_cron_times(day_of_week, time_str)
-    course_part = f" --course '{course}'" if course else ""
     marker = f"{VA_MARKER_PREFIX}{entry_id}"
-    login_line = "%02d %02d * * %d %s login %s" % (
-        cron["login_minute"], cron["login_hour"], cron["login_dow"], va_bin, marker,
+    tmp_file = f"/tmp/va_booking_{entry_id}"
+
+    course_part = f" --course '{course}'" if course else ""
+    find_cmd = (
+        f"{va_bin} login && {va_bin} --dangerously-approve-token --json classes"
+        f" --club '{club}'{course_part}"
+        f" --day {day_of_week} --time '{time_str}'"
+        f" | python3 -c \"import sys,json;print(json.load(sys.stdin)[0]['id'])\""
+        f" > {tmp_file}"
     )
-    book_line = "%02d %02d * * %d %s --dangerously-approve-token book --recurring --club '%s'%s --day %d --time '%s' --retry %d --retry-interval %d %s" % (
+    login_line = "%02d %02d * * %d %s %s" % (
+        cron["login_minute"], cron["login_hour"], cron["login_dow"], find_cmd, marker,
+    )
+    book_line = "%02d %02d * * %d %s --dangerously-approve-token book $(cat %s) --retry %d --retry-interval %d %s" % (
         cron["book_minute"], cron["book_hour"], cron["book_dow"], va_bin,
-        club, course_part, day_of_week, time_str, max_retries, retry_interval, marker,
+        tmp_file, max_retries, retry_interval, marker,
     )
     comment = "# %s — %s — %s %s %s" % (club, course or "any class", DOW_NAMES[day_of_week], time_str, marker)
     return [comment, login_line, book_line]
@@ -114,105 +127,44 @@ def _setup_logger(state_dir: Path) -> logging.Logger:
     return logger
 
 
-# ── Worker: book --recurring ──────────────────────────────────────
+# ── Worker: book with retry ───────────────────────────────────────
 
 
-def _resolve_class_token(
-    client: VirginActiveClient,
-    club: str | None,
-    course: str | None,
-    day_of_week: int | None,
-    time_str: str | None,
-) -> str:
-    """Find a class matching the given filters and return its booking token."""
-    today = datetime.now(UTC).date()
-    target_date = None
-    for d in range(2, 14):
-        dt = today + timedelta(days=d)
-        if dt.weekday() == day_of_week:
-            target_date = dt.strftime("%Y-%m-%d")
-            break
-    if target_date is None:
-        raise VAError(f"Cannot find target date for day_of_week={day_of_week}")
-
-    filters: dict[str, str | None] = {
-        "club": club,
-        "course": course,
-        "date": target_date,
-        "trainer": None,
-        "target": None,
-    }
-
-    try:
-        found = client.list_classes(filters, use_auth=True, approve=lambda _: True)
-    except VAError:
-        client.login()
-        found = client.list_classes(filters, use_auth=True, approve=lambda _: True)
-
-    matched = [c for c in found if c.start_time == time_str]
-    if not matched and course:
-        matched = [
-            c for c in found
-            if course.lower() in (c.title or "").lower()
-        ]
-    if not matched:
-        raise VAError(
-            f"Cannot find class matching time={time_str}, date={target_date}. "
-            f"Found {len(found)} classes for that date."
-        )
-
-    target = matched[0]
-    logger = logging.getLogger("va-automate")
-    logger.info("found class %s (%s)", target.token, target.title)
-    return target.token
-
-
-def worker_book_recurring(
+def worker_book(
     *,
     client: VirginActiveClient,
+    token: str,
     approve: ApprovalCallback,
-    state_dir: Path,
-    club: str | None,
-    course: str | None,
-    day_of_week: int | None,
-    time_str: str | None,
     max_retries: int = 10,
-    retry_interval: int = 60,
+    retry_interval: int = 5,
 ) -> dict[str, Any]:
-    """Recurring booking worker.
+    """Book a class with retry loop and Telegram notification.
 
-    Resolves the class at runtime by filters, books it via the shared client,
-    and retries on failure. Uses the approval callback from the CLI so that
-    --dangerously-approve-token is respected.
+    Tries to book the given token up to ``max_retries`` times.
+    Sends a Telegram notification on success or when all retries are exhausted.
     """
-    if not club or day_of_week is None or not time_str:
-        raise VAError("--recurring requires --club, --day, and --time")
-
-    logger = _setup_logger(state_dir)
-    class_desc = f"{club}/{course or 'any'} @ {time_str} ({DOW_NAMES[day_of_week]})"
-    logger.info("cron-book: starting for %s", class_desc)
-
+    logger = logging.getLogger("va-automate")
     notifier = from_config(None)
 
     last_error: str | None = None
 
     for attempt in range(1, max_retries + 1):
-        logger.info("attempt %d/%d", attempt, max_retries)
+        logger.info("book attempt %d/%d for token %s", attempt, max_retries, token)
         try:
-            token = _resolve_class_token(client, club, course, day_of_week, time_str)
             result = client.book(token, approve=approve)
             status_code = result.get("StatusCode", result.get("statusCode"))
             if status_code == 200 or (isinstance(status_code, str) and status_code == "200"):
                 logger.info("SUCCESS on attempt %d", attempt)
                 notifier.send(
                     "success",
-                    f"Booking confirmed: **{class_desc}** (attempt {attempt})",
+                    f"Booking confirmed for token **{token}** (attempt {attempt})",
                 )
-                return {"status": "success", "class": class_desc, "attempts": attempt}
+                return {"status": "success", "token": token, "attempts": attempt}
             else:
                 last_error = f"status {status_code}"
-                logger.warning("non-200 status: %s", result)
-                time.sleep(retry_interval)
+                logger.warning("non-200 status on attempt %d: %s", attempt, result)
+                if attempt < max_retries:
+                    time.sleep(retry_interval)
 
         except VAError as e:
             last_error = str(e)
@@ -227,12 +179,12 @@ def worker_book_recurring(
                 time.sleep(retry_interval)
 
     detail = f" — {last_error}" if last_error else ""
-    logger.error("FAILED after %d attempts for %s", max_retries, class_desc)
+    logger.error("FAILED after %d attempts for token %s%s", max_retries, token, detail)
     notifier.send(
         "error",
-        f"Booking failed: **{class_desc}** after {max_retries} attempts{detail}",
+        f"Booking failed for token **{token}** after {max_retries} attempts{detail}",
     )
-    raise VAError(f"Failed to book {class_desc} after {max_retries} attempts{detail}")
+    raise VAError(f"Failed to book token {token} after {max_retries} attempts{detail}")
 
 
 # ── Interactive add flow → print cron lines ────────────────────────
@@ -460,22 +412,27 @@ def _join_quoted(parts: list[str], idx: int) -> str:
     return first
 
 
+def _extract_marker_id(line: str) -> str | None:
+    """Extract the va-automate entry ID from a cron line."""
+    if VA_MARKER_PREFIX not in line:
+        return None
+    for part in line.split():
+        if "va-automate:" in part:
+            return part.split("va-automate:")[1]
+    return None
+
+
 def _cronline_to_dict(line: str) -> dict[str, str] | None:
-    """Parse a va-automate book cron line into a dict with id, club, course, day, time."""
+    """Parse a va-automate find/login line into a dict with id, club, course, day, time."""
     if not line.strip() or line.startswith("#"):
         return None
-    if "--recurring" not in line:
+    if "--json classes" not in line:
         return None
     parts = line.split()
-    marker_token = None
-    for part in parts:
-        if "va-automate:" in part and VA_MARKER_PREFIX in line:
-            marker_token = part
-            break
-    if not marker_token:
+    entry_id = _extract_marker_id(line)
+    if not entry_id:
         return None
 
-    entry_id = marker_token.split("va-automate:")[1]
     club = course = day_str = time_val = ""
 
     for i, part in enumerate(parts):
@@ -496,20 +453,31 @@ def _cronline_to_dict(line: str) -> dict[str, str] | None:
     return {
         "id": entry_id,
         "club": club,
-        "course": course or "any",
+        "course": course if not day_str else (course or "any"),
         "day": day_name,
         "time": time_val,
     }
 
 
 def _crontab_entries(content: str) -> list[dict[str, str]]:
-    """Parse crontab *content* and return all va-automate book entries."""
+    """Parse crontab *content* and return all va-automate book entries.
+
+    Groups lines by marker, extracts details from the find/login line
+    (which contains ``--json classes``).
+    """
+    lines = content.splitlines()
+    seen: set[str] = set()
     entries: list[dict[str, str]] = []
-    for line in content.splitlines():
-        if VA_MARKER_PREFIX in line:
-            entry = _cronline_to_dict(line)
-            if entry:
-                entries.append(entry)
+    for line in lines:
+        if "--json classes" not in line:
+            continue
+        entry_id = _extract_marker_id(line)
+        if not entry_id or entry_id in seen:
+            continue
+        seen.add(entry_id)
+        entry = _cronline_to_dict(line)
+        if entry:
+            entries.append(entry)
     return entries
 
 
@@ -517,7 +485,7 @@ def cmd_list() -> Any:
     """Return list of booking entries managed by the va bot."""
     content = _read_crontab()
     entries = _crontab_entries(content)
-    cron_lines = [line for line in content.splitlines() if VA_MARKER_PREFIX in line and "--recurring" in line]
+    cron_lines = [line for line in content.splitlines() if VA_MARKER_PREFIX in line and "$(cat /tmp/va_booking_" in line]
     return {
         "total": len(entries),
         "entries": entries,

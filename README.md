@@ -24,10 +24,10 @@ The project talks directly to the Virgin Active Italy web endpoints used by the 
 - interactive `va automate add` with `--install` to write crontab directly or `--raw` for piping
 - `va automate list` with table, JSON, and `--raw` modes
 - `va automate remove <id>` for non-interactive entry removal
-- `va book --recurring` self-contained command: resolves class by filters, books with retry
-- pre-login cron entry 5 min before for fast booking
-- per-class retry logic with configurable max attempts and interval
-- session recovery on expiry during cron runs
+- `va book --retry` retry loop with Telegram notification on success/failure
+- find/login cron entry resolves class token 5 min before the bell via `va --json classes`
+- book cron entry reads pre-resolved token for zero-delay booking
+- `va classes --day 0..6` auto-computes the next date for a day-of-week
 - Telegram push notifications on booking success or failure
 
 ## Important Disclaimer
@@ -166,6 +166,14 @@ venv/bin/va classes --club "Roma EUR" --date 2026-03-15 --from-time 18:00 --to-t
 venv/bin/va classes --no-auth --club "Roma EUR" --date 2026-03-15
 venv/bin/va --json classes --course "Reformer Pilates Align" --date 2026-03-15
 ```
+venv/bin/va --json classes --course "Reformer Pilates Align" --date 2026-03-15
+```
+
+Find the next Monday's classes without knowing the exact date:
+
+```bash
+venv/bin/va --json classes --club "Roma EUR" --course "Yoga Calm" --day 0 --time "18:00"
+```
 
 Supported filters:
 
@@ -173,7 +181,8 @@ Supported filters:
 - `--trainer`
 - `--club`
 - `--target`
-- `--date`
+- `--date` (explicit date; overrides `--day` if both given)
+- `--day` 0-6 (Mon-Sun, auto-computes next calendar date)
 - `--no-auth`
 - `--time`
 - `--from-time`
@@ -276,12 +285,14 @@ va automate add --raw | crontab -
 At the end it prints three cron lines (unless `--install` or `--raw` is used). Example for a Monday 18:00 Yoga class:
 
 ```
-# Roma EUR — Yoga Calm — Monday 18:00
-55 17 * * 5  va login # va-automate:abc12345
-00 18 * * 6  va --dangerously-approve-token book --recurring --club 'Roma EUR' --course 'Yoga Calm' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345
+# Roma EUR — Yoga Calm — Monday 18:00 # va-automate:abc12345
+55 17 * * 5  va login && va --dangerously-approve-token --json classes --club 'Roma EUR' --course 'Yoga Calm' --day 0 --time '18:00' | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])" > /tmp/va_booking_abc12345 # va-automate:abc12345
+00 18 * * 6  va --dangerously-approve-token book $(cat /tmp/va_booking_abc12345) --retry 10 --retry-interval 60 # va-automate:abc12345
 ```
 
-The login line runs 5 minutes before the booking line (both 48 h before class, on the preceding day), so the session is fresh. The book line uses `--dangerously-approve-token` because it runs unattended from cron.
+The **find/login line** runs 5 minutes before the book line (both 48 h before class, on the preceding day). It logs in, immediately resolves the class token by calling `va --json classes` with the configured filters, and writes the first result's ID to `/tmp/va_booking_<ID>`. This ensures the class is discovered well before the bell, avoiding any delay at booking time.
+
+The **book line** reads the pre-resolved token from the tmp file and attempts to book with retry. The retry interval is short (seconds) because the class resolution is already done — only the booking call needs to go through.
 
 #### `va automate list`
 
@@ -302,37 +313,25 @@ va automate remove abc12345    # remove by ID (non-interactive)
 va automate remove              # interactive selection
 ```
 
-#### `va book --recurring`
+#### `va book <token> --retry`
 
-**`va book --recurring`** is a self-contained command used by the cron lines above. It:
+The cron book line calls `va book` with a pre-resolved token. When `--retry` is given (> 1), it enters a retry loop:
 
-1. Auto-logs in if no valid session exists (uses `.env` or keyring credentials)
-2. Searches the API for a class matching `--club`, `--course`, `--day`, `--time` on the correct date
-3. Books the found class by resolved token using the shared `va book` path
-4. On failure: sleeps `--retry-interval` seconds, retries up to `--retry` times
-5. On success or exhaustion: sends Telegram notification (if configured)
+1. Calls the Virgin Active booking API with the given token
+2. On failure: sleeps `--retry-interval` seconds, retries up to `--retry` times
+3. On success or exhaustion: sends Telegram notification (if configured)
 
-Runs interactively (with approval prompt) or from cron with `--dangerously-approve-token`:
+Direct usage (with explicit token):
 
 ```bash
-va book --recurring \
-  --club "Roma EUR" \
-  --course "Yoga Calm" \
-  --day 0 \
-  --time "18:00" \
-  --retry 10 \
-  --retry-interval 60
+va --dangerously-approve-token book 355132c220 --retry 10 --retry-interval 5
 ```
 
 | Flag | Required | Meaning |
 | --- | --- | --- |
-| `--recurring` | yes | Switches to filter-based booking |
-| `--club` | yes | Club name |
-| `--course` | no | Course name (optional, matches substring) |
-| `--day` | yes | Day of week: 0=Mon … 6=Sun |
-| `--time` | yes | Class start time HH:MM |
-| `--retry` | no | Max retry attempts (default 10) |
-| `--retry-interval` | no | Seconds between retries (default 60) |
+| `token` | yes | Class token in `<bookingId>c<center>` format |
+| `--retry` | no | Max retry attempts (default 1, no retry) |
+| `--retry-interval` | no | Seconds between retries (default 5) |
 
 #### Telegram Notifications
 
@@ -387,4 +386,4 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE).
 - the login flow bridges `shop.virginactive.it` and `www.virginactive.it` automatically
 - the public calendar uses infinite scroll; the client follows pagination automatically
 - the bot assumes the booking token resolved during preflight is still valid at booking time
-- `va book --recurring` resolves the booking token at runtime by searching matching filters — no fixed ID needed
+- the find/login line resolves the booking token at login time (5 min before book) via `va --json classes` and saves it — the book line reads the file and books with zero class-resolution delay

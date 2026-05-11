@@ -437,43 +437,59 @@ Important interpretation notes:
 
 ## Automatic Booking Model
 
-The current CLI is sufficient to support an external scheduler, but it does not contain a scheduler itself.
+The CLI uses a two-phase cron execution model for unattended recurring booking:
 
-For unattended booking, the intended execution model is:
+### Phase 1 — Find/Login (runs T-48h-5min)
 
-1. run `va login` ahead of time to establish and persist the authenticated cookie jar
-2. shortly before the booking window opens, run authenticated `va classes` for the exact club/date/time to discover the target class and composite token
-3. at the exact opening timestamp, run `va book <bookingId>c<center>`
+The find/login cron line does two things in sequence (`&&`):
 
-Example:
+1. `va login` — establishes and caches the authenticated session
+2. `va --json classes --club 'X' --course 'Y' --day D --time 'T'` — resolves the class token and writes it to `/tmp/va_booking_<ENTRY_ID>`
 
-- class start: `2026-03-15 18:00` in `Europe/Rome`
-- booking-open instant: `2026-03-13 18:00` in `Europe/Rome`
-- pre-flight discovery can happen slightly earlier, for example at `2026-03-13 17:58`
+This runs 5 minutes before the book line, on the same day-of-week (both 48 h before the class). The token is pre-resolved so the actual booking at the bell has zero class-discovery overhead.
 
-Important assumptions and boundaries:
+### Phase 2 — Book (runs at exactly T-48h)
 
-- the opening instant should be interpreted in `Europe/Rome`
-- only the `book` call needs to happen exactly at the boundary; login, session checks, and class discovery can happen earlier
-- unattended flows must pass `--dangerously-approve-token`, otherwise the CLI will block waiting for interactive approval
-- the current implementation assumes a token discovered during pre-flight is still usable at the opening instant
-- if that assumption stops holding in production, the automation strategy must change to fetch `classes` again immediately before `book`
+The book line reads the pre-resolved token and calls `va book $(cat /tmp/va_booking_<ENTRY_ID>) --retry N --retry-interval S`. If the first `BookClass` call fails, it retries every `S` seconds up to `N` attempts, then sends a Telegram notification (success or final failure).
 
-Operational guidance for another agent:
+### Example for a Monday 18:00 class
 
-- do not guess the token; always resolve it from `va classes`
-- if pre-flight does not return the expected class, stop and re-query rather than booking a nearby match
-- expect the first booking attempt at the boundary to occasionally be slightly early from the server's perspective; a short retry window is reasonable
-- a practical retry strategy is to retry for 5 to 15 seconds on "too early" style responses or transient network failures
-- session freshness is not guaranteed indefinitely; a scheduler should be prepared to refresh login before the trigger if the saved session is no longer valid
+```
+# Roma EUR — Yoga Calm — Monday 18:00 # va-automate:abc12345
+55 17 * * 5 va login && va --dangerously-approve-token --json classes --club 'Roma EUR' --course 'Yoga Calm' --day 0 --time '18:00' | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])" > /tmp/va_booking_abc12345 # va-automate:abc12345
+00 18 * * 6 va --dangerously-approve-token book $(cat /tmp/va_booking_abc12345) --retry 10 --retry-interval 5 # va-automate:abc12345
+```
 
-What the current docs and tests prove:
+### Crontab management
+
+- `va automate list` parses the find/login lines to extract club/course/day/time
+- `va automate remove <ID>` deletes all lines (comment, find, book) matching the marker
+- The marker `# va-automate:<ID>` is preserved on all three lines so removal is unambiguous
+
+### Important assumptions and boundaries
+
+- the opening instant is interpreted in `Europe/Rome`
+- only the `book` call needs to happen exactly at the boundary; login and class discovery happen 5 minutes earlier
+- unattended flows must pass `--dangerously-approve-token`, otherwise the CLI blocks waiting for interactive approval
+- the implementation assumes a token discovered 5 minutes earlier is still usable at the opening instant
+- if that assumption stops holding, the automation strategy would need to move class resolution into the book line again
+
+### Operational guidance for another agent
+
+- do not guess the token; always resolve it from `va --json classes`
+- if the find/login line fails to write the tmp file, the book line will fail with "No such file or directory" — this is by design
+- expect the first booking attempt at the boundary to occasionally be slightly early from the server's perspective; the `--retry` loop handles this
+- a practical retry strategy is 10 attempts at 5-second intervals (50 seconds total window)
+- session freshness is not guaranteed indefinitely; the find/login step 5 minutes before ensures fresh cookies
+
+### What the current docs and tests prove
 
 - `classes` can surface a composite booking token even when the rendered state is not currently bookable
-- authenticated listing re-establishes the `www` session when needed before reading classes
+- `va classes --day 0..6` auto-computes the next calendar date, enabling cron lines without hardcoded dates
 - `book` splits and submits the composite token directly to `BookClass`
+- `worker_book()` retries on transient errors and sends Telegram on success or exhaustion
 
-What is still not guaranteed by the code contract:
+### What is still not guaranteed by the code contract
 
 - that Virgin Active will always expose the final booking token before the 48-hour boundary
 - that the token remains stable across the pre-flight and trigger phases

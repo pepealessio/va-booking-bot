@@ -1,45 +1,23 @@
 from __future__ import annotations
 
 import io
-import tempfile
 import unittest
 from contextlib import redirect_stdout
-from pathlib import Path
 from unittest.mock import patch, MagicMock
-
-import httpx
 
 from va_cli import cli
 from va_cli.automate import (
     VA_MARKER_PREFIX,
     _cronline_to_dict,
     _do_remove,
-    _resolve_class_token,
     build_cron_entry,
     cmd_list,
     compute_cron_times,
     interactive_add,
-    worker_book_recurring,
+    worker_book,
 )
 from va_cli.client import VAError
 from va_cli.models import CalendarClass
-
-
-def make_config(state_dir: Path) -> Config:
-    return Config(
-        username="test@example.com",
-        password="secret",
-        login_page_url="https://shop.virginactive.it/account/login",
-        login_submit_url="https://shop.virginactive.it/account/login",
-        login_status_url="https://www.virginactive.it/rest-api/login-status",
-        calendar_page_url="https://www.virginactive.it/calendario-corsi",
-        calendar_filter_url="https://www.virginactive.it/calendario-corsi/JFilter",
-        integration_base_url="https://www.virginactive.it/VirginIntegrations/IntegrationPlatform",
-        state_dir=state_dir,
-        timeout_seconds=5,
-        queue_full_threshold=999,
-        booking_open_hours=48,
-    )
 
 
 # =====================================================================
@@ -75,10 +53,11 @@ class CronComputationTests(unittest.TestCase):
         lines = build_cron_entry("Roma EUR", 0, "18:00", course="Yoga")
         self.assertEqual(len(lines), 3)
         self.assertTrue(lines[0].startswith("#"))
-        self.assertIn("va login", lines[1])
-        self.assertIn("va --dangerously-approve-token book --recurring", lines[2])
-        self.assertIn("--club 'Roma EUR'", lines[2])
-        self.assertIn("--course 'Yoga'", lines[2])
+        self.assertIn("va login &&", lines[1])
+        self.assertIn("--dangerously-approve-token --json classes", lines[1])
+        self.assertIn("--club 'Roma EUR'", lines[1])
+        self.assertIn("--course 'Yoga'", lines[1])
+        self.assertIn("$(cat /tmp/va_booking_", lines[2])
 
 
 # =====================================================================
@@ -90,7 +69,7 @@ class CronEntryTests(unittest.TestCase):
 
     def test_no_course_omits_it(self) -> None:
         lines = build_cron_entry("Roma EUR", 1, "09:00")
-        self.assertNotIn("--course", lines[2])
+        self.assertNotIn("--course", lines[1])
 
     def test_includes_retry_flags(self) -> None:
         lines = build_cron_entry(
@@ -114,30 +93,16 @@ class CronEntryTests(unittest.TestCase):
 
 class WorkerBookTests(unittest.TestCase):
 
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.state_dir = Path(self._tmp.name)
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
-
     def test_success_first_attempt(self) -> None:
         mock_client = MagicMock()
         mock_client.book.return_value = {"StatusCode": 200, "StatusMessage": "ok"}
 
-        with patch("va_cli.automate._resolve_class_token", return_value="100c220"):
-            with patch("va_cli.automate.time.sleep"):
-                result = worker_book_recurring(
-                    client=mock_client,
-                    approve=lambda _: True,
-                    state_dir=self.state_dir,
-                    club="Roma EUR",
-                    course="Yoga",
-                    day_of_week=0,
-                    time_str="18:00",
-                    max_retries=3,
-                    retry_interval=1,
-                )
+        with patch("va_cli.automate.time.sleep"):
+            result = worker_book(
+                client=mock_client, token="100c220",
+                approve=lambda _: True,
+                max_retries=3, retry_interval=1,
+            )
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["attempts"], 1)
 
@@ -145,16 +110,12 @@ class WorkerBookTests(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.book.side_effect = [VAError("temporarily unavailable"), {"StatusCode": 200}]
 
-        with patch("va_cli.automate._resolve_class_token", return_value="100c220"):
-            with patch("va_cli.automate.time.sleep"):
-                result = worker_book_recurring(
-                    client=mock_client,
-                    approve=lambda _: True,
-                    state_dir=self.state_dir,
-                    club="Roma EUR", course="Yoga",
-                    day_of_week=0, time_str="18:00",
-                    max_retries=5, retry_interval=1,
-                )
+        with patch("va_cli.automate.time.sleep"):
+            result = worker_book(
+                client=mock_client, token="100c220",
+                approve=lambda _: True,
+                max_retries=5, retry_interval=1,
+            )
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["attempts"], 2)
 
@@ -162,89 +123,16 @@ class WorkerBookTests(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.book.side_effect = VAError("server error")
 
-        with patch("va_cli.automate._resolve_class_token", return_value="100c220"):
-            with patch("va_cli.automate.time.sleep"):
-                with self.assertRaises(VAError):
-                    worker_book_recurring(
-                        client=mock_client,
-                        approve=lambda _: True,
-                        state_dir=self.state_dir,
-                        club="Roma EUR", course="Yoga",
-                        day_of_week=0, time_str="18:00",
-                        max_retries=2, retry_interval=1,
-                    )
-
-    def test_missing_params_raises(self) -> None:
-        with self.assertRaises(VAError):
-            worker_book_recurring(
-                client=MagicMock(),
-                approve=lambda _: True,
-                state_dir=self.state_dir,
-                club=None,
-                course=None,
-                day_of_week=0,
-                time_str="18:00",
-                max_retries=3,
-                retry_interval=1,
-            )
+        with patch("va_cli.automate.time.sleep"):
+            with self.assertRaises(VAError):
+                worker_book(
+                    client=mock_client, token="100c220",
+                    approve=lambda _: True,
+                    max_retries=2, retry_interval=1,
+                )
 
 
-# =====================================================================
-# 4. _resolve_class_token tests (4 tests)
-# =====================================================================
 
-
-class ResolveClassTokenTests(unittest.TestCase):
-
-    def test_matches_by_time(self) -> None:
-        mock_client = MagicMock()
-        mock_client.list_classes.return_value = [CalendarClass(
-            index=1, token="100c220", booking_id="100",
-            booking_center="220", title="Yoga",
-            date="2026-05-15", start_time="18:00",
-        )]
-
-        token = _resolve_class_token(mock_client, "Roma EUR", "Yoga", 0, "18:00")
-        self.assertEqual(token, "100c220")
-
-    def test_raises_on_no_match(self) -> None:
-        mock_client = MagicMock()
-        mock_client.list_classes.return_value = [CalendarClass(
-            index=1, token="100c220", booking_id="100",
-            booking_center="220", title="Spinning",
-            date="2026-05-15", start_time="09:00",
-        )]
-
-        with self.assertRaises(VAError):
-            _resolve_class_token(mock_client, "Roma EUR", "Yoga", 0, "18:00")
-
-    def test_fallback_course_name(self) -> None:
-        mock_client = MagicMock()
-        mock_client.list_classes.return_value = [CalendarClass(
-            index=1, token="200c220", booking_id="200",
-            booking_center="220", title="Yoga Calm",
-            date="2026-05-15", start_time="19:00",
-        )]
-
-        token = _resolve_class_token(mock_client, "Roma EUR", "Yoga Calm", 0, "18:00")
-        self.assertEqual(token, "200c220")
-
-    def test_relogins_on_list_classes_error(self) -> None:
-        login_called = [False]
-        mock_client = MagicMock()
-        mock_client.login.side_effect = lambda: login_called.__setitem__(0, True)
-        mock_client.list_classes.side_effect = [
-            VAError("session expired"),
-            [CalendarClass(
-                index=1, token="300c220", booking_id="300",
-                booking_center="220", title="Yoga",
-                date="2026-05-15", start_time="18:00",
-            )],
-        ]
-
-        token = _resolve_class_token(mock_client, "Roma EUR", "Yoga", 0, "18:00")
-        self.assertTrue(login_called[0])
-        self.assertEqual(token, "300c220")
 
 
 # =====================================================================
@@ -292,53 +180,45 @@ class FakeAutomateClient:
         return {"StatusCode": 200}
 
 
-class CliRecurringTests(unittest.TestCase):
+class CliBookTests(unittest.TestCase):
 
     @patch("va_cli.cli.CredentialStore")
-    def test_book_recurring_missing_club_exits(self, store_cls) -> None:
-        store_cls.return_value.load.return_value = None
-        with self.assertRaises(SystemExit) as exc:
-            cli.main(["book", "--recurring", "--day", "0", "--time", "18:00"])
-        self.assertEqual(exc.exception.code, 2)
-
-    @patch("va_cli.cli.CredentialStore")
-    def test_book_recurring_missing_day_exits(self, store_cls) -> None:
-        store_cls.return_value.load.return_value = None
-        with self.assertRaises(SystemExit) as exc:
-            cli.main(["book", "--recurring", "--club", "X", "--time", "18:00"])
-        self.assertEqual(exc.exception.code, 2)
-
-    @patch("va_cli.cli.CredentialStore")
-    def test_book_recurring_with_all_flags(self, store_cls) -> None:
-        store_cls.return_value.load.return_value = None
-        with patch("va_cli.cli.VirginActiveClient", FakeAutomateClient):
-            with patch("va_cli.cli.worker_book_recurring") as mock_worker:
-                mock_worker.return_value = {"status": "success", "attempts": 1}
-                stdout = io.StringIO()
-                with redirect_stdout(stdout):
-                    code = cli.main([
-                        "book", "--recurring",
-                        "--club", "Roma EUR", "--course", "Yoga",
-                        "--day", "0", "--time", "18:00",
-                        "--retry", "5", "--retry-interval", "30",
-                    ])
-        self.assertEqual(code, 0)
-        mock_worker.assert_called_once()
-        kwargs = mock_worker.call_args[1]
-        self.assertEqual(kwargs["club"], "Roma EUR")
-        self.assertEqual(kwargs["course"], "Yoga")
-        self.assertEqual(kwargs["day_of_week"], 0)
-        self.assertEqual(kwargs["time_str"], "18:00")
-        self.assertEqual(kwargs["max_retries"], 5)
-        self.assertEqual(kwargs["retry_interval"], 30)
-
-    @patch("va_cli.cli.CredentialStore")
-    def test_book_without_recurring_requires_token(self, store_cls) -> None:
+    def test_book_missing_token_exits(self, store_cls) -> None:
         store_cls.return_value.load.return_value = None
         with patch("va_cli.cli.VirginActiveClient", FakeAutomateClient):
             with self.assertRaises(SystemExit) as exc:
                 cli.main(["book"])
         self.assertEqual(exc.exception.code, 2)
+
+    @patch("va_cli.cli.CredentialStore")
+    def test_book_direct_with_token(self, store_cls) -> None:
+        store_cls.return_value.load.return_value = None
+        with patch("va_cli.cli.VirginActiveClient", FakeAutomateClient):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = cli.main([
+                    "--dangerously-approve-token", "book", "100c220",
+                ])
+        self.assertEqual(code, 0)
+
+    @patch("va_cli.cli.CredentialStore")
+    def test_book_with_retry(self, store_cls) -> None:
+        store_cls.return_value.load.return_value = None
+        with patch("va_cli.cli.VirginActiveClient", FakeAutomateClient):
+            with patch("va_cli.cli.worker_book") as mock_worker:
+                mock_worker.return_value = {"status": "success", "attempts": 1}
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    code = cli.main([
+                        "--dangerously-approve-token", "book",
+                        "100c220", "--retry", "5", "--retry-interval", "30",
+                    ])
+        self.assertEqual(code, 0)
+        mock_worker.assert_called_once()
+        kwargs = mock_worker.call_args[1]
+        self.assertEqual(kwargs["token"], "100c220")
+        self.assertEqual(kwargs["max_retries"], 5)
+        self.assertEqual(kwargs["retry_interval"], 30)
 
 # =====================================================================
 # 11. Crontab entry ID marker (3 tests)
@@ -370,8 +250,13 @@ class CronEntryMarkerTests(unittest.TestCase):
 
 class CronlineParserTests(unittest.TestCase):
 
-    def test_parses_book_line(self) -> None:
-        line = "00 18 * * 6 va book --recurring --club 'Roma EUR' --course 'Yoga' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345"
+    def test_parses_find_line(self) -> None:
+        line = (
+            "55 17 * * 6 va login && va --dangerously-approve-token --json classes"
+            " --club 'Roma EUR' --course 'Yoga' --day 0 --time '18:00'"
+            " | python3 -c \"import sys,json;print(json.load(sys.stdin)[0]['id'])\""
+            " > /tmp/va_booking_abc12345 # va-automate:abc12345"
+        )
         result = _cronline_to_dict(line)
         self.assertIsNotNone(result)
         self.assertEqual(result["id"], "abc12345")
@@ -382,6 +267,14 @@ class CronlineParserTests(unittest.TestCase):
 
     def test_skips_comment_line(self) -> None:
         result = _cronline_to_dict("# Roma EUR — Yoga — Monday 18:00")
+        self.assertIsNone(result)
+
+    def test_skips_book_line(self) -> None:
+        line = (
+            "00 18 * * 6 va --dangerously-approve-token book $(cat /tmp/va_booking_abc12345)"
+            " --retry 10 --retry-interval 60 # va-automate:abc12345"
+        )
+        result = _cronline_to_dict(line)
         self.assertIsNone(result)
 
 
@@ -400,8 +293,13 @@ class CmdListTests(unittest.TestCase):
 
     def test_returns_entries(self) -> None:
         crontab = (
-            "# Roma EUR\n"
-            "00 18 * * 6 va book --recurring --club 'Roma EUR' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345\n"
+            "# Roma EUR — any class — Monday 18:00 # va-automate:abc12345\n"
+            "55 17 * * 6 va login && va --dangerously-approve-token --json classes"
+            " --club 'Roma EUR' --day 0 --time '18:00'"
+            " | python3 -c \"import sys,json;print(json.load(sys.stdin)[0]['id'])\""
+            " > /tmp/va_booking_abc12345 # va-automate:abc12345\n"
+            "00 18 * * 6 va --dangerously-approve-token book $(cat /tmp/va_booking_abc12345)"
+            " --retry 10 --retry-interval 60 # va-automate:abc12345\n"
         )
         with patch("va_cli.automate._read_crontab", return_value=crontab):
             result = cmd_list()
@@ -418,8 +316,13 @@ class CmdRemoveTests(unittest.TestCase):
 
     def test_found_and_removed(self) -> None:
         crontab = (
-            "# Yoga\n"
-            "00 18 * * 6 va book --recurring --club 'Roma EUR' --day 0 --time '18:00' --retry 10 --retry-interval 60 # va-automate:abc12345\n"
+            "# Yoga # va-automate:abc12345\n"
+            "55 17 * * 6 va login && va --dangerously-approve-token --json classes"
+            " --club 'Roma EUR' --day 0 --time '18:00'"
+            " | python3 -c \"import sys,json;print(json.load(sys.stdin)[0]['id'])\""
+            " > /tmp/va_booking_abc12345 # va-automate:abc12345\n"
+            "00 18 * * 6 va --dangerously-approve-token book $(cat /tmp/va_booking_abc12345)"
+            " --retry 10 --retry-interval 60 # va-automate:abc12345\n"
         )
         written: list[str] = []
 

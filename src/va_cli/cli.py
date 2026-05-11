@@ -4,13 +4,13 @@ import argparse
 import json
 import sys
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from getpass import getpass
 from typing import Any
 
 import httpx
 
-from .automate import cmd_add, cmd_list, cmd_remove, worker_book_recurring
+from .automate import cmd_add, cmd_list, cmd_remove, worker_book
 from .client import VAError, VirginActiveClient
 from .config import Config
 from .credentials import CredentialStore
@@ -40,16 +40,12 @@ def build_parser() -> argparse.ArgumentParser:
     classes.add_argument("--time")
     classes.add_argument("--from-time")
     classes.add_argument("--to-time")
+    classes.add_argument("--day", type=int, help="Day of week: 0=Mon … 6=Sun (computes next date)")
 
     book = subparsers.add_parser("book", help="Book a class.")
     book.add_argument("token", nargs="?", default=None, help="Class token in '<bookingId>c<center>' format.")
-    book.add_argument("--recurring", action="store_true", help="Resolve class by filters and book with retry.")
-    book.add_argument("--club", dest="book_club")
-    book.add_argument("--course", dest="book_course")
-    book.add_argument("--day", type=int, help="Day of week: 0=Mon … 6=Sun")
-    book.add_argument("--time", dest="book_time")
-    book.add_argument("--retry", type=int, default=10, help="Max retry attempts (default 10)")
-    book.add_argument("--retry-interval", type=int, default=60, help="Seconds between retries (default 60)")
+    book.add_argument("--retry", type=int, default=1, help="Max retry attempts (default 1, no retry)")
+    book.add_argument("--retry-interval", type=int, default=5, help="Seconds between retries (default 5)")
 
     cancel = subparsers.add_parser("cancel", help="Cancel a booked class.")
     cancel.add_argument("token", help="Booking token in '<bookingId>c<center>' format.")
@@ -134,11 +130,14 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
         return {"status": "success"}
     if args.command == "classes":
         use_auth = client.has_saved_session() and not args.no_auth
+        date = getattr(args, "date", None)
+        if date is None and getattr(args, "day", None) is not None:
+            date = _next_weekday_date(args.day)
         flt: dict[str, str | None] = {
             "course": getattr(args, "course", None),
             "trainer": getattr(args, "trainer", None),
             "club": getattr(args, "club", None),
-            "date": getattr(args, "date", None),
+            "date": date,
             "target": getattr(args, "target", None),
         }
         classes = client.list_classes(flt, use_auth=use_auth, approve=approve if use_auth else None)
@@ -156,20 +155,17 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             result.append({k: v for k, v in out.items() if v is not None})
         return result
     if args.command == "book":
-        if getattr(args, "recurring", False):
-            return worker_book_recurring(
-                client=client,
-                approve=approve,
-                state_dir=client.config.state_dir,
-                club=getattr(args, "book_club"),
-                course=getattr(args, "book_course"),
-                day_of_week=getattr(args, "day"),
-                time_str=getattr(args, "book_time"),
-                max_retries=getattr(args, "retry"),
-                retry_interval=getattr(args, "retry_interval"),
-            )
         if not args.token:
-            raise VAError("book requires a token or --recurring with filters.")
+            raise VAError("book requires a token")
+        max_retries = getattr(args, "retry", 1)
+        if max_retries > 1:
+            return worker_book(
+                client=client,
+                token=args.token,
+                approve=approve,
+                max_retries=max_retries,
+                retry_interval=getattr(args, "retry_interval", 5),
+            )
         return client.book(args.token, approve=approve)
     if args.command == "cancel":
         return client.cancel(args.token, approve=approve)
@@ -238,17 +234,20 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         value = getattr(args, name, None)
         if value:
             _parse_time(value, f"--{name.replace('_', '-')}", parser)
-    if args.command == "book" and getattr(args, "recurring", False):
-        if not getattr(args, "book_club", None):
-            parser.error("--recurring requires --club")
-        if getattr(args, "day") is None:
-            parser.error("--recurring requires --day")
-        if not getattr(args, "book_time", None):
-            parser.error("--recurring requires --time")
-        dow = getattr(args, "day", -1)
+    if args.command == "classes" and getattr(args, "day", None) is not None:
+        dow = args.day
         if not 0 <= dow <= 6:
             parser.error("--day must be between 0 (Mon) and 6 (Sun)")
-        _parse_time(args.book_time, "--time", parser)
+
+
+def _next_weekday_date(day_of_week: int) -> str:
+    """Return the next calendar date matching day_of_week (0=Mon, 6=Sun)."""
+    today = datetime.now(UTC).date()
+    for d in range(14):
+        dt = today + timedelta(days=d)
+        if dt.weekday() == day_of_week:
+            return dt.strftime("%Y-%m-%d")
+    raise VAError(f"Could not compute date for day_of_week={day_of_week}")
 
 
 def _resolve_credentials(
