@@ -295,7 +295,7 @@ def interactive_add(client: VirginActiveClient) -> None:
     print("List entries:", file=sys.stderr)
     print(f"  crontab -l | {sys.argv[0]} automate list", file=sys.stderr)
     print("Remove this entry:", file=sys.stderr)
-    print(f"  crontab -l | {sys.argv[0]} automate remove {entry_id} | crontab -", file=sys.stderr)
+    print(f"  {sys.argv[0]} automate remove {entry_id} | crontab -", file=sys.stderr)
 
 
 # ── CLI entry points ──────────────────────────────────────────────
