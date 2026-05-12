@@ -148,22 +148,16 @@ crontab -l | va automate list --json    # JSON
 crontab -l | va automate list --raw     # cron lines only
 ```
 
-Reads stdin if piped; falls back to `crontab -l`.
+stdin must be piped from `crontab -l`.
 
 ### `va automate remove`
 
 ```bash
 crontab -l | va automate remove abc12345 | crontab -   # by ID
-va automate remove                      # interactive
+crontab -l | va automate remove | crontab -            # interactive
 ```
 
-For non-interactive removal (by ID), reads crontab from stdin. For interactive, reads via `crontab -l` so the terminal stays free for the prompt. Modified crontab goes to stdout — pipe to `crontab -` to install.
-
-Preview without installing:
-
-```bash
-crontab -l | va automate remove abc12345 | less
-```
+stdin must be piped from `crontab -l` **and** stdout must be piped to `crontab -`. The command refuses to run if either end is a terminal — this prevents accidentally printing or discarding crontab data.
 
 ### Telegram Notifications
 

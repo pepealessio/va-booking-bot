@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import random
 import re
-import subprocess
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -365,16 +364,6 @@ def _print_noninteractive(
 # ── List / remove from crontab ────────────────────────────────────
 
 
-def _read_crontab() -> str:
-    """Return the current crontab content as a string."""
-    result = subprocess.run(
-        ["crontab", "-l"], capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        return ""
-    return result.stdout
-
-
 def _join_quoted(parts: list[str], idx: int) -> str:
     """Join a sequence of tokens that were split by shell quoting."""
     if idx >= len(parts):
@@ -470,10 +459,8 @@ def _crontab_entries(content: str) -> list[dict[str, str]]:
     return entries
 
 
-def cmd_list(content: str | None = None) -> dict[str, Any]:
-    """Return list of booking entries from crontab *content* (or read via ``crontab -l``)."""
-    if content is None:
-        content = _read_crontab()
+def cmd_list(content: str) -> dict[str, Any]:
+    """Return list of booking entries from crontab *content*."""
     entries = _crontab_entries(content)
     cron_lines = [line for line in content.splitlines() if VA_MARKER_PREFIX in line and "$(cat /tmp/va_booking_" in line]
     return {
@@ -483,16 +470,18 @@ def cmd_list(content: str | None = None) -> dict[str, Any]:
     }
 
 
-def cmd_remove(content: str | None = None, *, entry_id: str | None = None) -> None:
+def cmd_remove(content: str, *, entry_id: str | None = None) -> None:
     """Remove a booking entry and print the modified crontab to stdout.
 
-    When *content* is ``None`` it reads via ``crontab -l``.
     The modified crontab goes to stdout; the confirmation message goes to
     stderr.  Returns ``None`` — the caller should not render anything
     extra.
     """
-    if content is None:
-        content = _read_crontab()
+    if sys.stdout.isatty():
+        raise VAError(
+            "Output would go to the terminal — pipe to crontab - instead:\n"
+            "  crontab -l | va automate remove | crontab -"
+        )
     entries = _crontab_entries(content)
     if not entries:
         raise VAError("No booking entries found in crontab")

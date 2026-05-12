@@ -196,9 +196,9 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             cmd_add(client, args)
             return None
         if cmd == "list":
-            content = None
-            if not sys.stdin.isatty():
-                content = sys.stdin.read()
+            if sys.stdin.isatty():
+                raise VAError("stdin must be piped — run: crontab -l | va automate list")
+            content = sys.stdin.read()
             result = cmd_list(content)
             if getattr(args, "list_as_json", False) or args.as_json:
                 return result
@@ -209,11 +209,10 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             print("No booking entries in crontab.")
             return {"status": "empty"}
         if cmd == "remove":
-            entry_id = getattr(args, "entry_id", None)
-            content = None
-            if entry_id and not sys.stdin.isatty():
-                content = sys.stdin.read()
-            cmd_remove(content, entry_id=entry_id)
+            if sys.stdin.isatty():
+                raise VAError("stdin must be piped — run: crontab -l | va automate remove [id] | crontab -")
+            content = sys.stdin.read()
+            cmd_remove(content, entry_id=getattr(args, "entry_id", None))
             return None
         raise VAError("Unknown automate subcommand.")
     raise VAError("Unknown command.")

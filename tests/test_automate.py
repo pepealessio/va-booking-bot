@@ -282,8 +282,7 @@ class CronlineParserTests(unittest.TestCase):
 class CmdListTests(unittest.TestCase):
 
     def test_empty_crontab(self) -> None:
-        with patch("va_cli.automate._read_crontab", return_value=""):
-            result = cmd_list()
+        result = cmd_list("")
         self.assertEqual(result["total"], 0)
         self.assertEqual(result["entries"], [])
 
@@ -297,8 +296,7 @@ class CmdListTests(unittest.TestCase):
             "00 18 * * 6 va --dangerously-approve-token book $(cat /tmp/va_booking_abc12345)"
             " --retry 10 --retry-interval 60 # va-automate:abc12345\n"
         )
-        with patch("va_cli.automate._read_crontab", return_value=crontab):
-            result = cmd_list()
+        result = cmd_list(crontab)
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["entries"][0]["id"], "abc12345")
 
