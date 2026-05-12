@@ -8,8 +8,8 @@ Command-line tools for Virgin Active Italy class discovery, booking, cancellatio
 
 ```bash
 python -m venv venv
-venv/bin/pip install -e .
 source venv/bin/activate
+pip install git+https://github.com/pepealessio/va-booking-bot.git
 va --help
 ```
 
