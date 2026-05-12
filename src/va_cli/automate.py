@@ -239,7 +239,7 @@ def _pick_class(classes) -> tuple:
     return classes[sel]
 
 
-def interactive_add(client: VirginActiveClient) -> None:
+def interactive_add(client: VirginActiveClient, max_retries: int = 10, retry_interval: int = 60) -> None:
     """Walk through selection and print cron lines to stdout.
 
     Commentary (summary, usage tips) goes to stderr so the cron lines
@@ -280,9 +280,22 @@ def interactive_add(client: VirginActiveClient) -> None:
         file=sys.stderr,
     )
 
+    old_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        max_retries = questionary.text("Max retry attempts:", default=str(max_retries)).ask()
+        if max_retries:
+            max_retries = int(max_retries)
+        retry_interval = questionary.text("Retry interval (seconds):", default=str(retry_interval)).ask()
+        if retry_interval:
+            retry_interval = int(retry_interval)
+    finally:
+        sys.stdout = old_stdout
+
     entry_id = _generate_id()
     lines = build_cron_entry(
         club=club, course=course, day_of_week=day_of_week, time_str=time_str,
+        max_retries=max_retries, retry_interval=retry_interval,
         entry_id=entry_id, va_bin=sys.argv[0],
     )
 
@@ -301,7 +314,19 @@ def interactive_add(client: VirginActiveClient) -> None:
 # ── CLI entry points ──────────────────────────────────────────────
 
 
-def cmd_add(client: VirginActiveClient) -> None:
+def cmd_add(client: VirginActiveClient, args: Any = None) -> None:
+    max_retries = getattr(args, "retry", 10)
+    retry_interval = getattr(args, "retry_interval", 60)
+
+    club = getattr(args, "club", None)
+    day = getattr(args, "day", None)
+    time_str = getattr(args, "time", None)
+
+    if club is not None and day is not None and time_str is not None:
+        course = getattr(args, "course", None)
+        _print_noninteractive(club, day, time_str, course, max_retries, retry_interval)
+        return
+
     if not client.has_saved_session():
         print("No saved session. Logging in first...", file=sys.stderr)
         try:
@@ -309,7 +334,32 @@ def cmd_add(client: VirginActiveClient) -> None:
         except VAError as e:
             print(f"error: {e}", file=sys.stderr)
             return
-    interactive_add(client)
+    interactive_add(client, max_retries, retry_interval)
+
+
+def _print_noninteractive(
+    club: str,
+    day: int,
+    time_str: str,
+    course: str | None,
+    max_retries: int,
+    retry_interval: int,
+) -> None:
+    entry_id = _generate_id()
+    lines = build_cron_entry(
+        club=club, course=course, day_of_week=day, time_str=time_str,
+        max_retries=max_retries, retry_interval=retry_interval,
+        entry_id=entry_id, va_bin=sys.argv[0],
+    )
+    for line in lines:
+        print(line)
+    print(file=sys.stderr)
+    print("Install these cron lines:", file=sys.stderr)
+    print(f"  {sys.argv[0]} automate add | crontab -", file=sys.stderr)
+    print("List entries:", file=sys.stderr)
+    print(f"  crontab -l | {sys.argv[0]} automate list", file=sys.stderr)
+    print("Remove this entry:", file=sys.stderr)
+    print(f"  {sys.argv[0]} automate remove {entry_id} | crontab -", file=sys.stderr)
 
 
 # ── List / remove from crontab ────────────────────────────────────
@@ -461,6 +511,9 @@ def cmd_remove(content: str | None = None, *, entry_id: str | None = None) -> No
     if new_content is None:
         raise VAError(f"No booking entry with id={entry_id}")
 
+    if not new_content.strip():
+        print("  Warning: crontab will be empty after removal.", file=sys.stderr)
+
     print(new_content, end="")
     print(f"  Removed entry: {entry_id}", file=sys.stderr)
 
@@ -474,5 +527,9 @@ def _do_remove(entry_id: str, content: str) -> str | None:
     new_lines = [line for line in lines if not (line.strip() and target in line)]
     if len(new_lines) == len(lines):
         return None
-    result = re.sub(r"\n{3,}", "\n\n", "\n".join(new_lines)).rstrip("\n") + "\n" if new_lines else ""
+    collapsed = re.sub(r"\n{3,}", "\n\n", "\n".join(new_lines)).strip("\n")
+    if collapsed:
+        result = collapsed + "\n"
+    else:
+        result = ""
     return result

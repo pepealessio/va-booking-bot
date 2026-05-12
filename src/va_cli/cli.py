@@ -64,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
     auto_sub = auto.add_subparsers(dest="automate_command", required=True)
 
     add_parser = auto_sub.add_parser("add", help="Interactively select a class and print cron lines to stdout.")
+    _add_filter_args(add_parser)
+    add_parser.add_argument("--day", type=int, help="Day of week: 0=Mon … 6=Sun (non-interactive mode requires --club, --day, --time)")
+    add_parser.add_argument("--time", help="Class time HH:MM (non-interactive mode requires --club, --day, --time)")
+    add_parser.add_argument("--retry", type=int, default=10, help="Max retry attempts (default 10)")
+    add_parser.add_argument("--retry-interval", type=int, default=60, help="Seconds between retries (default 60)")
 
     list_parser = auto_sub.add_parser("list", help="List recurring booking entries from crontab.")
     list_parser.add_argument("--json", action="store_true", dest="list_as_json")
@@ -188,7 +193,7 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
     if args.command == "automate":
         cmd = getattr(args, "automate_command", None)
         if cmd == "add":
-            cmd_add(client)
+            cmd_add(client, args)
             return None
         if cmd == "list":
             content = None
@@ -204,10 +209,11 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             print("No booking entries in crontab.")
             return {"status": "empty"}
         if cmd == "remove":
+            entry_id = getattr(args, "entry_id", None)
             content = None
-            if not sys.stdin.isatty():
+            if entry_id and not sys.stdin.isatty():
                 content = sys.stdin.read()
-            cmd_remove(content, entry_id=getattr(args, "entry_id", None))
+            cmd_remove(content, entry_id=entry_id)
             return None
         raise VAError("Unknown automate subcommand.")
     raise VAError("Unknown command.")

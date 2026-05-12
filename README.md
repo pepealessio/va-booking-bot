@@ -1,46 +1,8 @@
 # Virgin Active Italy CLI and Booking Bot
 
-<p align="center">
-  <img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python">
-  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
-  <img src="https://img.shields.io/badge/github-pepealessio%2Fva--booking--bot-blue" alt="GitHub">
-</p>
-
 Command-line tools for Virgin Active Italy class discovery, booking, cancellation, and recurring booking automation.
 
-This repository contains one tool:
-
-- `va`: the low-level CLI for login, class discovery, booking, cancellation, and debugging
-
-The project talks directly to the Virgin Active Italy web endpoints used by the public calendar and member booking flow.
-
-## Features
-
-### `va`
-
-- login with CLI flags, `.env`, keyring, or interactive prompts
-- saved session reuse
-- public or authenticated class discovery
-- filter support for club, course, trainer, target, date, and time
-- direct booking and cancellation by composite class token
-- debug commands for auth checks and filter discovery
-
-### `va automate` — recurring booking automation
-
-- `va automate add` prints cron lines to stdout — pipe to crontab yourself
-- `crontab -l | va automate list` with table, JSON, and `--raw` modes
-- `crontab -l | va automate remove <id> | crontab -` — never writes your crontab directly
-- `va book --retry` retry loop with Telegram notification on success/failure
-- find/login cron entry resolves class token 5 min before the bell via `va --json classes`
-- book cron entry reads pre-resolved token for zero-delay booking
-- `va classes --day 0..6` auto-computes the next date for a day-of-week
-- Telegram push notifications on booking success or failure
-
-## Important Disclaimer
-
-> This project is **unofficial** and depends on live Virgin Active Italy web behavior. It may stop working if the site changes its markup, auth flow, or booking endpoints.
->
-> Use it at your own risk and review the code before running unattended automation with your account.
+> **Disclaimer**: This project is **unofficial** and depends on live Virgin Active Italy web behavior. It may stop working if the site changes its markup, auth flow, or booking endpoints. Use at your own risk.
 
 ## Installation
 
@@ -48,17 +10,12 @@ The project talks directly to the Virgin Active Italy web endpoints used by the 
 python -m venv venv
 venv/bin/pip install -e .
 source venv/bin/activate
-```
-
-After installation the `va` command is available inside the virtual environment:
-
-```bash
 va --help
 ```
 
-## Quick Start
+## Getting Started
 
-### 1. Set credentials
+### 1. Credentials
 
 Minimal `.env`:
 
@@ -67,184 +24,58 @@ VA_USERNAME=you@example.com
 VA_PASSWORD=your-password
 ```
 
-`va login` resolves credentials in this order:
-
-1. `--user` and `--passwd`
-2. `.env` via `VA_USERNAME` and `VA_PASSWORD`
-3. system keyring
-4. interactive prompt
-
-### 2. Log in
+`va login` resolves credentials in this order: `--user`/`--passwd` flags → `.env` → system keyring → interactive prompt.
 
 ```bash
-va login
+va login                          # quick
+va login --user you --passwd secret --save   # save to keyring
 ```
 
-Or save credentials to the keyring:
-
-```bash
-va login --user you@example.com --passwd secret --save
-```
-
-### 3. Find classes
+### 2. Find and book a class
 
 ```bash
 va classes --club "Roma EUR" --date 2026-03-15
-va classes --club "Roma EUR" --date 2026-03-15 --time 18:00
-va --json classes --club "Roma EUR" --date 2026-03-15
-```
-
-### 4. Book a class
-
-```bash
-va --dangerously-approve-token book 355132c220
-```
-
-## Configuration
-
-The shared runtime uses these environment variables.
-
-### Credentials
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `VA_USERNAME` | unset | Username used when explicit CLI credentials are not passed. |
-| `VA_PASSWORD` | unset | Password used when explicit CLI credentials are not passed. |
-
-### Local State
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `VA_STATE_DIR` | `.va_state` in the current working directory | Directory used to store local runtime state such as sessions. |
-
-Files stored in `<VA_STATE_DIR>`:
-
-| File | Purpose |
-| --- | --- |
-| `session.json` | Persisted authentication cookies |
-| `automate.log` | Runtime log for recurring booking attempts |
-
-### HTTP Endpoints
-
-These normally do not need to be changed.
-
-| Variable | Default |
-| --- | --- |
-| `VA_LOGIN_PAGE_URL` | `https://shop.virginactive.it/account/login` |
-| `VA_LOGIN_SUBMIT_URL` | `https://shop.virginactive.it/account/login` |
-| `VA_LOGIN_STATUS_URL` | `https://www.virginactive.it/rest-api/login-status` |
-| `VA_CALENDAR_PAGE_URL` | `https://www.virginactive.it/calendario-corsi` |
-| `VA_CALENDAR_FILTER_URL` | `https://www.virginactive.it/calendario-corsi/JFilter` |
-| `VA_INTEGRATION_BASE_URL` | `https://www.virginactive.it/VirginIntegrations/IntegrationPlatform` |
-
-### Runtime
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `VA_TIMEOUT_SECONDS` | `20` | HTTP timeout used by the internal clients. |
-| `VA_QUEUE_FULL_THRESHOLD` | `15` | Queue length at or above which a class is marked `overbooked` instead of `queue`. |
-| `VA_BOOKING_OPEN_HOURS` | `48` | Hours before a class that bookings open. Classes older than this window showing `full` are remapped to `not_yet_open`. |
-| `VA_NOTIFY_TOKEN` | unset | Telegram Bot API token for push notifications. |
-| `VA_NOTIFY_CHAT_ID` | unset | Your Telegram chat ID for push notifications. |
-
-## `va` Usage
-
-### Login
-
-```bash
-va login
-va login --user you@example.com --passwd secret --save
-va --debug login
-```
-
-Behavior:
-
-- `.env` is read-only input; the CLI never writes back to it
-- `--save` stores credentials in the system keyring after a successful login
-- `va logout` clears both the saved session and saved keyring credentials
-
-### Classes
-
-Examples:
-
-```bash
-va classes
-va classes --club "Roma EUR" --date 2026-03-15
-va classes --club "Roma EUR" --date 2026-03-15 --time 18:00
-va classes --club "Roma EUR" --date 2026-03-15 --from-time 18:00 --to-time 20:00
-va classes --no-auth --club "Roma EUR" --date 2026-03-15
-va --json classes --course "Reformer Pilates Align" --date 2026-03-15
-```
-
-Find the next Monday's classes without knowing the exact date:
-
-```bash
 va --json classes --club "Roma EUR" --course "Yoga Calm" --day 0 --time "18:00"
-```
-
-Supported filters:
-
-- `--course`
-- `--trainer`
-- `--club`
-- `--target`
-- `--date` (explicit date; overrides `--day` if both given)
-- `--day` 0-6 (Mon-Sun, auto-computes next calendar date)
-- `--no-auth`
-- `--time`
-- `--from-time`
-- `--to-time`
-
-Time filter rules:
-
-- `--time HH:MM` matches classes with that exact start time
-- `--from-time HH:MM` keeps classes starting at or after that time
-- `--to-time HH:MM` keeps classes starting at or before that time
-- `--time` cannot be combined with `--from-time` or `--to-time`
-
-Output:
-
-- plain mode prints a table
-- JSON mode prints machine-readable objects with snake_case keys; null fields are omitted
-- class identifiers are the composite token form `<bookingId>c<center>`, for example `355132c220`
-- JSON objects include `booking_id` and `booking_center` as separate fields for automation scripting
-- `debug whoami` JSON keys are converted from CamelCase to snake_case (`IsLoggedIn` → `is_logged_in`)
-
-Status values:
-
-- `bookable` — class can be booked
-- `full` — class is sold out (booking window open)
-- `not_yet_open` — `Prenotazioni non disponibili` displayed but booking window not yet open (>48h before class)
-- `queue` — waitlist position available
-- `overbooked` — queue length meets or exceeds the `VA_QUEUE_FULL_THRESHOLD` (default 15); waitlist is effectively not useful
-- `queue_full` — waitlist is full (e.g. "lista di attesa piena")
-- `unavailable` — any other state (e.g. "Troppo tardi")
-
-Status remapping is applied after parsing:
-
-- A class with `queue` status and `queue_length >= VA_QUEUE_FULL_THRESHOLD` is remapped to `overbooked`.
-- A class with `full` status whose start time is more than `VA_BOOKING_OPEN_HOURS` in the future is remapped to `not_yet_open`. This disambiguates distant classes where the booking window hasn't opened yet from genuinely sold-out classes.
-
-Authenticated behavior:
-
-- if a saved session exists, `va classes` uses it by default
-- `--no-auth` forces public calendar mode
-- if no saved session exists, `va classes` falls back to the public calendar
-- using the saved authenticated session requires approval unless `--dangerously-approve-token` is passed
-
-### Book and Cancel
-
-```bash
 va --dangerously-approve-token book 355132c220
 va --dangerously-approve-token cancel 355132c220
 ```
 
-Notes:
+The composite token format is `<bookingId>c<center>` (e.g. `355132c220`). Booking requires a saved authenticated session.
 
-- booking requires a valid saved authenticated session
-- the only accepted identifier is the composite token format `<bookingId>c<center>`
+## Configuration
 
-### Debug Commands
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VA_USERNAME` | — | Account email |
+| `VA_PASSWORD` | — | Account password |
+| `VA_STATE_DIR` | `.va_state` | State directory (session, logs) |
+| `VA_TIMEOUT_SECONDS` | `20` | HTTP timeout |
+| `VA_QUEUE_FULL_THRESHOLD` | `15` | Queue length for `overbooked` status |
+| `VA_BOOKING_OPEN_HOURS` | `48` | Hours before class bookings open |
+| `VA_NOTIFY_TOKEN` | — | Telegram Bot API token |
+| `VA_NOTIFY_CHAT_ID` | — | Telegram chat ID |
+
+See [`docs/agent-handoff.md`](docs/agent-handoff.md) for endpoint config and reverse-engineering notes.
+
+## Usage
+
+### `va classes`
+
+Filters: `--course`, `--trainer`, `--club`, `--target`, `--date`, `--day` (0=Mon..6=Sun, auto-computes date), `--no-auth`, `--time`, `--from-time`, `--to-time`.
+
+```bash
+va classes
+va classes --club "Roma EUR" --day 0 --time "18:00"
+va --json classes --club "Roma EUR" --course "Yoga Calm"
+```
+
+Time rules: `--time` matches exact, `--from-time`/`--to-time` set bounds. Cannot combine `--time` with range flags.
+
+Output can be a table or JSON (with `--json`). JSON uses snake_case keys, no nulls, includes `booking_id` and `booking_center`.
+
+Statuses: `bookable`, `full`, `not_yet_open`, `queue`, `overbooked` (queue ≥ threshold), `queue_full`, `unavailable`. Remapping: `queue` with `queue_length ≥ VA_QUEUE_FULL_THRESHOLD` → `overbooked`; `full` >48h away → `not_yet_open`.
+
+### `va debug`
 
 ```bash
 va debug whoami
@@ -255,28 +86,45 @@ va debug targets
 va debug dates --club "Roma EUR"
 ```
 
-### Automate — Recurring Booking
+### `va book / cancel`
 
-The `automate` subcommand manages cron entries for recurring class bookings. No config file is written — the cron line **is** the configuration.
+```bash
+va --dangerously-approve-token book 355132c220
+va --dangerously-approve-token cancel 355132c220
+```
 
-#### `va automate add`
+The `book` command supports `--retry N` (max attempts, default 1) and `--retry-interval S` (seconds between retries, default 5). When retries are enabled, it loops on failure and sends a Telegram notification on success or exhaustion.
 
-Interactively select a class and print cron lines to stdout:
+### `va automate add`
+
+Generate cron lines for recurring booking. Two modes:
+
+**Interactive** — prompts for club, course, day, class, retry count, and retry interval:
 
 ```bash
 va automate add | crontab -
 ```
 
-The command walks you through selecting:
+**Non-interactive** — all flags on the command line:
 
-1. Club
-2. Course (or any)
-3. Day of week (Mon–Sun)
-4. Specific class (shown for the nearest matching date)
+```bash
+va automate add --club "Roma EUR" --course "Yoga Calm" --day 0 --time "18:00" --retry 10 --retry-interval 60 | crontab -
+```
 
-Commentary (club, course, install tips) goes to **stderr**, so only the raw cron lines reach **stdout** — clean for piping.
+| Flag | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `--club` | yes* | — | Club name |
+| `--day` | yes* | — | Day of week 0=Mon..6=Sun |
+| `--time` | yes* | — | Class time HH:MM |
+| `--course` | no | — | Course name (omit for any) |
+| `--retry` | no | 10 | Max retry attempts |
+| `--retry-interval` | no | 60 | Seconds between retries |
 
-Example output for a Monday 18:00 Yoga class (to stdout):
+\* Required for non-interactive mode. When all three are present, interactive prompts are skipped.
+
+Prompts, commentary, and install tips go to **stderr** — only raw cron lines reach stdout for clean piping.
+
+Example output:
 
 ```
 # Roma EUR — Yoga Calm — Monday 18:00 # va-automate:abc12345
@@ -284,112 +132,61 @@ Example output for a Monday 18:00 Yoga class (to stdout):
 00 18 * * 6  va --dangerously-approve-token book $(cat /tmp/va_booking_abc12345) --retry 10 --retry-interval 60 # va-automate:abc12345
 ```
 
-The **find/login line** runs 5 minutes before the book line (both 48 h before class, on the preceding day). It logs in, immediately resolves the class token by calling `va --json classes` with the configured filters, and writes the first result's ID to `/tmp/va_booking_<ID>`. This ensures the class is discovered well before the bell, avoiding any delay at booking time.
+The **find/login line** runs 5 min before the book line (both 48 h before class). It logs in, resolves the class token via `va --json classes`, and writes it to `/tmp/va_booking_<ID>`. The **book line** reads the pre-resolved token and retries on failure.
 
-The **book line** reads the pre-resolved token from the tmp file and attempts to book with retry. The retry interval is short (seconds) because the class resolution is already done — only the booking call needs to go through.
-
-**Important**: `va automate add` **never** touches your crontab. You own the pipe:
+Install (appends to existing crontab):
 
 ```bash
-# Install (appends to existing crontab):
 (crontab -l; va automate add) | crontab -
 ```
 
-#### `va automate list`
-
-Read your crontab and list entries:
+### `va automate list`
 
 ```bash
-crontab -l | va automate list         # table view
-crontab -l | va automate list --json   # JSON output
-crontab -l | va automate list --raw    # raw cron lines only (pipe-friendly)
+crontab -l | va automate list           # table
+crontab -l | va automate list --json    # JSON
+crontab -l | va automate list --raw     # cron lines only
 ```
 
-The command reads crontab content from stdin when piped, or calls `crontab -l` automatically as a fallback.
+Reads stdin if piped; falls back to `crontab -l`.
 
-#### `va automate remove`
-
-Remove a booking entry. Pass the entry ID non-interactively, or omit it for interactive selection:
+### `va automate remove`
 
 ```bash
-crontab -l | va automate remove abc12345 | crontab -   # remove by ID, install result
-crontab -l | va automate remove          # interactive selection, prints to stdout
+crontab -l | va automate remove abc12345 | crontab -   # by ID
+va automate remove                      # interactive
 ```
 
-The command reads crontab content from stdin when piped (or calls `crontab -l` as fallback), removes the matching lines, and prints the modified crontab to stdout. You control where it goes — typically back to crontab via `| crontab -`.
+For non-interactive removal (by ID), reads crontab from stdin. For interactive, reads via `crontab -l` so the terminal stays free for the prompt. Modified crontab goes to stdout — pipe to `crontab -` to install.
+
+Preview without installing:
 
 ```bash
-# Preview the change without installing:
 crontab -l | va automate remove abc12345 | less
 ```
 
-#### `va book <token> --retry`
+### Telegram Notifications
 
-The cron book line calls `va book` with a pre-resolved token. When `--retry` is given (> 1), it enters a retry loop:
+Set `VA_NOTIFY_TOKEN` and `VA_NOTIFY_CHAT_ID` to receive push notifications on booking success or failure. See the full guide at [`docs/telegram-setup.md`](docs/telegram-setup.md).
 
-1. Calls the Virgin Active booking API with the given token
-2. On failure: sleeps `--retry-interval` seconds, retries up to `--retry` times
-3. On success or exhaustion: sends Telegram notification (if configured)
-
-Direct usage (with explicit token):
-
-```bash
-va --dangerously-approve-token book 355132c220 --retry 10 --retry-interval 5
-```
-
-| Flag | Required | Meaning |
-| --- | --- | --- |
-| `token` | yes | Class token in `<bookingId>c<center>` format |
-| `--retry` | no | Max retry attempts (default 1, no retry) |
-| `--retry-interval` | no | Seconds between retries (default 5) |
-
-#### Telegram Notifications
-
-When a booking succeeds or all retries are exhausted, the bot can send a push notification to your Telegram chat. See the full setup guide at [`docs/telegram-setup.md`](docs/telegram-setup.md).
-
-Configure via environment variables:
-
-| Variable | Meaning |
-| --- | --- |
-| `VA_NOTIFY_TOKEN` | Telegram Bot API token |
-| `VA_NOTIFY_CHAT_ID` | Your Telegram chat ID |
-
-Notifications are only sent on **booking success** and **fatal booking failure** (all retries exhausted). Transient intermediate retries are silent.
-
-Example messages:
-
-- `✅ Booking confirmed: Roma EUR/Yoga Calm @ 18:00 (attempt 1)`
-- `❌ Booking failed: Roma EUR/Yoga Calm @ 18:00 after 10 attempts`
-
-All cron booking attempts are also logged to `.va_state/automate.log`.
+All cron booking attempts are logged to `.va_state/automate.log`.
 
 ### Global Flags
 
 | Flag | Meaning |
 | --- | --- |
-| `--json` | Print JSON instead of plain text output. |
-| `--debug` | Print request and troubleshooting diagnostics. |
-| `--dangerously-approve-token` | Skip the interactive approval prompt for authenticated actions. |
+| `--json` | JSON output |
+| `--debug` | Request diagnostics |
+| `--dangerously-approve-token` | Skip interactive approval prompt |
 
 ## Development
 
-Run the test suite:
-
 ```bash
-PYTHONPATH=src venv/bin/python -m unittest discover -s tests -v
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 ```
 
 Useful files:
-
-- [`docs/agent-handoff.md`](docs/agent-handoff.md): reverse-engineering notes and production quirks
-- [`docs/telegram-setup.md`](docs/telegram-setup.md): Telegram bot setup guide
-- `src/va_cli/`: low-level CLI surface
-- `tests/`: regression tests
-
-## License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
-
-## Notes
-
-- filter labels like club names are translated into the site's hidden internal values automatically — the CLI accepts the visible labels, not the UUIDs
+- [`docs/agent-handoff.md`](docs/agent-handoff.md) — reverse-engineering notes
+- [`docs/telegram-setup.md`](docs/telegram-setup.md) — Telegram bot setup
+- `src/va_cli/` — CLI code
+- `tests/` — regression tests
