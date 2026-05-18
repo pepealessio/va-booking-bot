@@ -340,7 +340,7 @@ class CliTests(unittest.TestCase):
         with patch("va_cli.cli._build_notifier", return_value=mock_notifier):
             exit_code = cli.main(["--dangerously-approve-token", "book", "208239c232", "--notify", "sf"])
         self.assertEqual(exit_code, 0)
-        mock_notifier.send.assert_called_once_with("success", "Booking confirmed for token 208239c232")
+        mock_notifier.send.assert_called_once_with("success", "Booking confirmed for token **208239c232**")
 
     @patch("va_cli.cli.CredentialStore")
     @patch("va_cli.cli.VirginActiveClient")

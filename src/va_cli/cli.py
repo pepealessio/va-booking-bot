@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from .automate import cmd_add, cmd_list, cmd_remove, worker_book
+from .automate import cmd_add, cmd_list, cmd_remove, worker_book, _fmt_class_info
 from .notifier import NullNotifier, from_config, TelegramNotifier
 from .client import VAError, VirginActiveClient
 from .config import Config
@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     book.add_argument("--retry", type=int, default=1, help="Max retry attempts (default 1, no retry)")
     book.add_argument("--retry-interval", type=int, default=5, help="Seconds between retries (default 5)")
     book.add_argument("--notify", choices=["s", "f", "sf"], help="Notify on success (s), fail (f), or both (sf).")
+    book.add_argument("--info", help="Class info 'Club|Title|Time' for Telegram notifications.")
 
     cancel = subparsers.add_parser("cancel", help="Cancel a booked class.")
     cancel.add_argument("token", help="Booking token in '<bookingId>c<center>' format.")
@@ -194,6 +195,7 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
         return result
     if args.command == "book":
         notify = getattr(args, "notify", None)
+        info = getattr(args, "info", None)
         notifier = _build_notifier(notify)
         if not args.token:
             raise VAError("book requires a token")
@@ -206,15 +208,17 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
                 max_retries=max_retries,
                 retry_interval=getattr(args, "retry_interval", 5),
                 notify=notify,
+                info=info,
             )
+        class_desc = _fmt_class_info(args.token, info)
         try:
             result = client.book(args.token, approve=approve)
         except (VAError, httpx.HTTPError) as exc:
             if "f" in (notify or ""):
-                notifier.send("error", f"Booking failed: {exc}")
+                notifier.send("error", f"Booking failed for {class_desc}")
             raise
         if "s" in (notify or ""):
-            notifier.send("success", f"Booking confirmed for token {args.token}")
+            notifier.send("success", f"Booking confirmed for {class_desc}")
         return result
     if args.command == "cancel":
         return client.cancel(args.token, approve=approve)

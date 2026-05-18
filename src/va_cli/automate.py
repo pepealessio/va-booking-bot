@@ -93,21 +93,31 @@ def build_cron_entry(
         f"{va_bin} login --notify f && {va_bin} --dangerously-approve-token --json classes --notify f"
         f" --club '{club}'{course_part}"
         f" --day {day_of_week} --time '{time_str}'"
-        f" | python3 -c \"import sys,json;print(json.load(sys.stdin)[0]['id'])\""
+        f" | python3 -c \"import sys,json;d=json.load(sys.stdin)[0];print(d['id']);print(f\\\"{{d.get('club','')}}|{{d.get('title','')}}|{{d.get('start_time','')}}\\\")\""
         f" > {tmp_file}"
     )
     login_line = "%02d %02d * * %d %s %s" % (
         cron["login_minute"], cron["login_hour"], cron["login_dow"], find_cmd, marker,
     )
-    book_line = "%02d %02d * * %d %s --dangerously-approve-token book --notify sf $(cat %s) --retry %d --retry-interval %d %s" % (
+    book_line = "%02d %02d * * %d %s --dangerously-approve-token book --notify sf \"$(head -1 %s)\" --info \"$(tail -1 %s)\" --retry %d --retry-interval %d %s" % (
         cron["book_minute"], cron["book_hour"], cron["book_dow"], va_bin,
-        tmp_file, max_retries, retry_interval, marker,
+        tmp_file, tmp_file, max_retries, retry_interval, marker,
     )
     comment = "# %s — %s — %s %s %s" % (club, course or "any class", DOW_NAMES[day_of_week], time_str, marker)
     return [comment, login_line, book_line]
 
 
 # ── Worker: book with retry ───────────────────────────────────────
+
+
+def _fmt_class_info(token: str, info: str | None) -> str:
+    """Format human-readable class description from ``info`` (Club|Title|Time)."""
+    if info:
+        parts = info.split("|", 2)
+        if len(parts) == 3:
+            club, title, time_str = parts
+            return f"**{title}** at {club} ({time_str})"
+    return f"token **{token}**"
 
 
 def worker_book(
@@ -118,6 +128,7 @@ def worker_book(
     max_retries: int = 10,
     retry_interval: int = 5,
     notify: str | None = None,
+    info: str | None = None,
 ) -> dict[str, Any]:
     """Book a class with retry loop and optional Telegram notification.
 
@@ -128,6 +139,7 @@ def worker_book(
     logger = logging.getLogger("va-automate")
     notifier = from_config(None) if notify else NullNotifier()
 
+    class_desc = _fmt_class_info(token, info)
     last_error: str | None = None
 
     for attempt in range(1, max_retries + 1):
@@ -140,7 +152,7 @@ def worker_book(
                 if notify and "s" in notify:
                     notifier.send(
                         "success",
-                        f"Booking confirmed for token **{token}** (attempt {attempt})",
+                        f"Booking confirmed for {class_desc} (attempt {attempt})",
                     )
                 return {"status": "success", "token": token, "attempts": attempt}
             else:
@@ -166,7 +178,7 @@ def worker_book(
     if notify and "f" in notify:
         notifier.send(
             "error",
-            f"Booking failed for token **{token}** after {max_retries} attempts{detail}",
+            f"Booking failed for {class_desc} after {max_retries} attempts{detail}",
         )
     raise VAError(f"Failed to book token {token} after {max_retries} attempts{detail}")
 

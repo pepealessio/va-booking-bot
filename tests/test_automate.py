@@ -10,6 +10,7 @@ from va_cli.automate import (
     VA_MARKER_PREFIX,
     _cronline_to_dict,
     _do_remove,
+    _fmt_class_info,
     build_cron_entry,
     cmd_list,
     compute_cron_times,
@@ -56,7 +57,8 @@ class CronComputationTests(unittest.TestCase):
         self.assertIn("--dangerously-approve-token --json classes", lines[1])
         self.assertIn("--club 'Roma EUR'", lines[1])
         self.assertIn("--course 'Yoga'", lines[1])
-        self.assertIn("$(cat /tmp/va_booking_", lines[2])
+        self.assertIn('"$(head -1 /tmp/va_booking_', lines[2])
+        self.assertIn('--info "$(tail -1 /tmp/va_booking_', lines[2])
 
 
 # =====================================================================
@@ -89,10 +91,27 @@ class CronEntryTests(unittest.TestCase):
         self.assertIn("login --notify f", lines[1])
         self.assertIn("--json classes --notify f", lines[1])
         self.assertIn("book --notify sf", lines[2])
+        self.assertIn("--info", lines[2])
 
 
 # =====================================================================
-# 3. Worker book with retry (3 tests)
+# 3. Class info formatting (2 tests)
+# =====================================================================
+
+
+class FmtClassInfoTests(unittest.TestCase):
+
+    def test_info_with_all_parts(self) -> None:
+        result = _fmt_class_info("100c220", "Roma EUR|Yoga Calm|18:00")
+        self.assertEqual(result, "**Yoga Calm** at Roma EUR (18:00)")
+
+    def test_info_none_falls_back_to_token(self) -> None:
+        result = _fmt_class_info("100c220", None)
+        self.assertEqual(result, "token **100c220**")
+
+
+# =====================================================================
+# 4. Worker book with retry (5 tests)
 # =====================================================================
 
 
@@ -170,7 +189,7 @@ class WorkerBookTests(unittest.TestCase):
 
 
 # =====================================================================
-# 4. CLI integration (3 tests)
+# 5. CLI integration (3 tests)
 # =====================================================================
 
 
@@ -255,7 +274,7 @@ class CliBookTests(unittest.TestCase):
         self.assertEqual(kwargs["retry_interval"], 30)
 
 # =====================================================================
-# 5. Crontab entry ID marker (3 tests)
+# 6. Crontab entry ID marker (3 tests)
 # =====================================================================
 
 
@@ -278,7 +297,7 @@ class CronEntryMarkerTests(unittest.TestCase):
 
 
 # =====================================================================
-# 6. Cronline parser (3 tests)
+# 7. Cronline parser (3 tests)
 # =====================================================================
 
 
@@ -313,7 +332,7 @@ class CronlineParserTests(unittest.TestCase):
 
 
 # =====================================================================
-# 7. List command (2 tests)
+# 8. List command (2 tests)
 # =====================================================================
 
 
@@ -340,7 +359,7 @@ class CmdListTests(unittest.TestCase):
 
 
 # =====================================================================
-# 8. Remove command (3 tests)
+# 9. Remove command (3 tests)
 # =====================================================================
 
 
