@@ -52,7 +52,7 @@ class CronComputationTests(unittest.TestCase):
         lines = build_cron_entry("Roma EUR", 0, "18:00", course="Yoga")
         self.assertEqual(len(lines), 3)
         self.assertTrue(lines[0].startswith("#"))
-        self.assertIn("va login &&", lines[1])
+        self.assertIn("va login --notify f &&", lines[1])
         self.assertIn("--dangerously-approve-token --json classes", lines[1])
         self.assertIn("--club 'Roma EUR'", lines[1])
         self.assertIn("--course 'Yoga'", lines[1])
@@ -83,6 +83,12 @@ class CronEntryTests(unittest.TestCase):
         self.assertIn("Test", lines[0])
         self.assertIn("Friday", lines[0])
         self.assertIn("12:00", lines[0])
+
+    def test_cron_entry_includes_notify_flags(self) -> None:
+        lines = build_cron_entry("Roma EUR", 0, "18:00", course="Yoga")
+        self.assertIn("login --notify f", lines[1])
+        self.assertIn("--json classes --notify f", lines[1])
+        self.assertIn("book --notify sf", lines[2])
 
 
 # =====================================================================
@@ -129,6 +135,38 @@ class WorkerBookTests(unittest.TestCase):
                     approve=lambda _: True,
                     max_retries=2, retry_interval=1,
                 )
+
+    def test_notify_f_skips_success_send(self) -> None:
+        mock_client = MagicMock()
+        mock_client.book.return_value = {"StatusCode": 200}
+        mock_notifier = MagicMock()
+
+        with patch("va_cli.automate.time.sleep"):
+            with patch("va_cli.automate.from_config", return_value=mock_notifier):
+                result = worker_book(
+                    client=mock_client, token="100c220",
+                    approve=lambda _: True,
+                    max_retries=1, retry_interval=1,
+                    notify="f",
+                )
+        self.assertEqual(result["status"], "success")
+        mock_notifier.send.assert_not_called()
+
+    def test_notify_f_sends_error_on_failure(self) -> None:
+        mock_client = MagicMock()
+        mock_client.book.side_effect = VAError("server error")
+        mock_notifier = MagicMock()
+
+        with patch("va_cli.automate.time.sleep"):
+            with patch("va_cli.automate.from_config", return_value=mock_notifier):
+                with self.assertRaises(VAError):
+                    worker_book(
+                        client=mock_client, token="100c220",
+                        approve=lambda _: True,
+                        max_retries=2, retry_interval=1,
+                        notify="f",
+                    )
+        mock_notifier.send.assert_called_once_with("error", "Booking failed for token **100c220** after 2 attempts — server error")
 
 
 # =====================================================================

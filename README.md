@@ -29,6 +29,7 @@ VA_PASSWORD=your-password
 ```bash
 va login                          # quick
 va login --user you --passwd secret --save   # save to keyring
+va login --notify f                # notify on login failure via Telegram
 ```
 
 ### 2. Find and book a class
@@ -67,6 +68,7 @@ Filters: `--course`, `--trainer`, `--club`, `--target`, `--date`, `--day` (0=Mon
 va classes
 va classes --club "Roma EUR" --day 0 --time "18:00"
 va --json classes --club "Roma EUR" --course "Yoga Calm"
+va classes --club "Roma EUR" --date 2026-03-15 --notify f
 ```
 
 Time rules: `--time` matches exact, `--from-time`/`--to-time` set bounds. Cannot combine `--time` with range flags.
@@ -93,7 +95,14 @@ va --dangerously-approve-token book 355132c220
 va --dangerously-approve-token cancel 355132c220
 ```
 
-The `book` command supports `--retry N` (max attempts, default 1) and `--retry-interval S` (seconds between retries, default 5). When retries are enabled, it loops on failure and sends a Telegram notification on success or exhaustion.
+The `book` command supports `--retry N` (max attempts, default 1) and `--retry-interval S` (seconds between retries, default 5). When retries are enabled, it loops on failure.
+
+Use `--notify` to receive Telegram notifications — see the [Telegram Notifications](#telegram-notifications) section for setup.
+
+```bash
+va book 355132c220 --notify f     # notify on failure only
+va book 355132c220 --notify sf    # notify on both success and failure
+```
 
 ### `va automate add`
 
@@ -128,8 +137,8 @@ Example output:
 
 ```
 # Roma EUR — Yoga Calm — Monday 18:00 # va-automate:abc12345
-55 17 * * 5  va login && va --dangerously-approve-token --json classes --club 'Roma EUR' --course 'Yoga Calm' --day 0 --time '18:00' | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])" > /tmp/va_booking_abc12345 # va-automate:abc12345
-00 18 * * 6  va --dangerously-approve-token book $(cat /tmp/va_booking_abc12345) --retry 10 --retry-interval 60 # va-automate:abc12345
+55 17 * * 5  va login --notify f && va --dangerously-approve-token --json classes --notify f --club 'Roma EUR' --course 'Yoga Calm' --day 0 --time '18:00' | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])" > /tmp/va_booking_abc12345 # va-automate:abc12345
+00 18 * * 6  va --dangerously-approve-token book --notify sf $(cat /tmp/va_booking_abc12345) --retry 10 --retry-interval 60 # va-automate:abc12345
 ```
 
 The **find/login line** runs 5 min before the book line (both 48 h before class). It logs in, resolves the class token via `va --json classes`, and writes it to `/tmp/va_booking_<ID>`. The **book line** reads the pre-resolved token and retries on failure.
@@ -161,7 +170,23 @@ stdin must be piped from `crontab -l` **and** stdout must be piped to `crontab -
 
 ### Telegram Notifications
 
-Set `VA_NOTIFY_TOKEN` and `VA_NOTIFY_CHAT_ID` to receive push notifications on booking success or failure. See the full guide at [`docs/telegram-setup.md`](docs/telegram-setup.md).
+Set `VA_NOTIFY_TOKEN` and `VA_NOTIFY_CHAT_ID` to enable push notifications. See the full guide at [`docs/telegram-setup.md`](docs/telegram-setup.md).
+
+Once configured, use `--notify` on `login`, `classes`, or `book` to receive notifications:
+
+| `--notify` | Meaning |
+|---|---|
+| `--notify s` | Notify on success only |
+| `--notify f` | Notify on failure only |
+| `--notify sf` | Notify on both success and failure |
+
+```bash
+va login --notify f                    # Telegram on login failure
+va classes --notify f --club "Roma EUR"  # Telegram on class fetch failure
+va book TOKEN --notify sf               # Telegram on booking success or failure
+```
+
+Generated cron entries already include `--notify f` on the login/class-fetch steps and `--notify sf` on the booking step, so all automated runs send Telegram alerts.
 
 All cron booking attempts are logged to `.va_state/automate.log`.
 

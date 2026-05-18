@@ -11,7 +11,7 @@ from typing import Any
 import questionary
 
 from .client import VAError, VirginActiveClient, ApprovalCallback
-from .notifier import from_config
+from .notifier import NullNotifier, from_config
 
 # ── Day name helpers ─────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ def build_cron_entry(
 
     course_part = f" --course '{course}'" if course else ""
     find_cmd = (
-        f"{va_bin} login && {va_bin} --dangerously-approve-token --json classes"
+        f"{va_bin} login --notify f && {va_bin} --dangerously-approve-token --json classes --notify f"
         f" --club '{club}'{course_part}"
         f" --day {day_of_week} --time '{time_str}'"
         f" | python3 -c \"import sys,json;print(json.load(sys.stdin)[0]['id'])\""
@@ -99,7 +99,7 @@ def build_cron_entry(
     login_line = "%02d %02d * * %d %s %s" % (
         cron["login_minute"], cron["login_hour"], cron["login_dow"], find_cmd, marker,
     )
-    book_line = "%02d %02d * * %d %s --dangerously-approve-token book $(cat %s) --retry %d --retry-interval %d %s" % (
+    book_line = "%02d %02d * * %d %s --dangerously-approve-token book --notify sf $(cat %s) --retry %d --retry-interval %d %s" % (
         cron["book_minute"], cron["book_hour"], cron["book_dow"], va_bin,
         tmp_file, max_retries, retry_interval, marker,
     )
@@ -117,14 +117,16 @@ def worker_book(
     approve: ApprovalCallback,
     max_retries: int = 10,
     retry_interval: int = 5,
+    notify: str | None = None,
 ) -> dict[str, Any]:
-    """Book a class with retry loop and Telegram notification.
+    """Book a class with retry loop and optional Telegram notification.
 
     Tries to book the given token up to ``max_retries`` times.
-    Sends a Telegram notification on success or when all retries are exhausted.
+    Sends a Telegram notification on success or when all retries are exhausted
+    only when the ``notify`` flag (``"s"``, ``"f"``, or ``"sf"``) allows it.
     """
     logger = logging.getLogger("va-automate")
-    notifier = from_config(None)
+    notifier = from_config(None) if notify else NullNotifier()
 
     last_error: str | None = None
 
@@ -135,10 +137,11 @@ def worker_book(
             status_code = result.get("StatusCode", result.get("statusCode"))
             if status_code == 200 or (isinstance(status_code, str) and status_code == "200"):
                 logger.info("SUCCESS on attempt %d", attempt)
-                notifier.send(
-                    "success",
-                    f"Booking confirmed for token **{token}** (attempt {attempt})",
-                )
+                if notify and "s" in notify:
+                    notifier.send(
+                        "success",
+                        f"Booking confirmed for token **{token}** (attempt {attempt})",
+                    )
                 return {"status": "success", "token": token, "attempts": attempt}
             else:
                 last_error = f"status {status_code}"
@@ -160,10 +163,11 @@ def worker_book(
 
     detail = f" — {last_error}" if last_error else ""
     logger.error("FAILED after %d attempts for token %s%s", max_retries, token, detail)
-    notifier.send(
-        "error",
-        f"Booking failed for token **{token}** after {max_retries} attempts{detail}",
-    )
+    if notify and "f" in notify:
+        notifier.send(
+            "error",
+            f"Booking failed for token **{token}** after {max_retries} attempts{detail}",
+        )
     raise VAError(f"Failed to book token {token} after {max_retries} attempts{detail}")
 
 
