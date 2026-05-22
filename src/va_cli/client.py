@@ -63,6 +63,7 @@ class VirginActiveClient:
         self.config = config
         self.verbose = verbose
         self.store = SessionStore(config.session_path)
+        self._cache_path = config.state_dir / "class_cache.json"
         base_headers = dict(self.BROWSER_HEADERS)
         self.public_http = httpx.Client(
             follow_redirects=True,
@@ -162,7 +163,29 @@ class VirginActiveClient:
         approve: ApprovalCallback | None = None,
     ) -> list[CalendarClass]:
         payload = self._fetch_calendar_payload(filters, use_auth=use_auth, approve=approve)
-        return payload["classes"]
+        classes = payload["classes"]
+        self._save_class_cache(classes)
+        return classes
+
+    def _save_class_cache(self, classes: list[CalendarClass]) -> None:
+        data: dict[str, Any] = {}
+        if self._cache_path.exists():
+            with self._cache_path.open("r") as f:
+                data = json.load(f)
+        for c in classes:
+            if c.token not in data:
+                data[c.token] = {
+                    "token": c.token,
+                    "title": c.title,
+                    "club": c.club,
+                    "date": c.date,
+                    "start_time": c.start_time,
+                    "trainer": c.trainer,
+                    "room": c.room,
+                }
+        self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._cache_path.open("w") as f:
+            json.dump(data, f, indent=2, sort_keys=True)
 
     def _integration_request(
         self,

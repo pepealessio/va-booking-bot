@@ -213,7 +213,7 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
                 notify=notify,
                 info=info,
             )
-        class_desc = _fmt_class_info(args.token, info)
+        class_desc = _fmt_class_info(args.token, info, state_dir=client.config.state_dir)
         try:
             result = client.book(args.token, approve=approve)
         except (VAError, httpx.HTTPError) as exc:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import unittest
+from pathlib import Path
 from contextlib import redirect_stdout
 from unittest.mock import patch, MagicMock
 
@@ -57,8 +58,8 @@ class CronComputationTests(unittest.TestCase):
         self.assertIn("--dangerously-approve-token --json classes", lines[1])
         self.assertIn("--club 'Roma EUR'", lines[1])
         self.assertIn("--course 'Yoga'", lines[1])
-        self.assertIn('"$(head -1 /tmp/va_booking_', lines[2])
-        self.assertIn('--info "$(tail -1 /tmp/va_booking_', lines[2])
+        self.assertIn('"$(cat /tmp/va_booking_', lines[2])
+        self.assertNotIn('--info', lines[2])
 
 
 # =====================================================================
@@ -91,7 +92,6 @@ class CronEntryTests(unittest.TestCase):
         self.assertIn("login --notify f", lines[1])
         self.assertIn("--json classes --notify f", lines[1])
         self.assertIn("book --notify sf", lines[2])
-        self.assertIn("--info", lines[2])
 
 
 # =====================================================================
@@ -117,8 +117,13 @@ class FmtClassInfoTests(unittest.TestCase):
 
 class WorkerBookTests(unittest.TestCase):
 
+    def _mock_client(self) -> MagicMock:
+        client = MagicMock()
+        client.config.state_dir = Path("/tmp")
+        return client
+
     def test_success_first_attempt(self) -> None:
-        mock_client = MagicMock()
+        mock_client = self._mock_client()
         mock_client.book.return_value = {"StatusCode": 200, "StatusMessage": "ok"}
 
         with patch("va_cli.automate.time.sleep"):
@@ -131,7 +136,7 @@ class WorkerBookTests(unittest.TestCase):
         self.assertEqual(result["attempts"], 1)
 
     def test_retry_on_error_then_succeeds(self) -> None:
-        mock_client = MagicMock()
+        mock_client = self._mock_client()
         mock_client.book.side_effect = [VAError("temporarily unavailable"), {"StatusCode": 200}]
 
         with patch("va_cli.automate.time.sleep"):
@@ -144,7 +149,7 @@ class WorkerBookTests(unittest.TestCase):
         self.assertEqual(result["attempts"], 2)
 
     def test_exhausts_retries_raises(self) -> None:
-        mock_client = MagicMock()
+        mock_client = self._mock_client()
         mock_client.book.side_effect = VAError("server error")
 
         with patch("va_cli.automate.time.sleep"):
@@ -156,7 +161,7 @@ class WorkerBookTests(unittest.TestCase):
                 )
 
     def test_notify_f_skips_success_send(self) -> None:
-        mock_client = MagicMock()
+        mock_client = self._mock_client()
         mock_client.book.return_value = {"StatusCode": 200}
         mock_notifier = MagicMock()
 
@@ -172,7 +177,7 @@ class WorkerBookTests(unittest.TestCase):
         mock_notifier.send.assert_not_called()
 
     def test_notify_f_sends_error_on_failure(self) -> None:
-        mock_client = MagicMock()
+        mock_client = self._mock_client()
         mock_client.book.side_effect = VAError("server error")
         mock_notifier = MagicMock()
 

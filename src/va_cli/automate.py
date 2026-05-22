@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re
 import sys
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import questionary
@@ -94,15 +96,15 @@ def build_cron_entry(
         f"{va_bin} login --notify f && {va_bin} --dangerously-approve-token --json classes --notify f"
         f" --club '{club}'{course_part}"
         f" --day {day_of_week} --time '{time_str}'"
-        f" | python3 -c \"import sys,json;d=json.load(sys.stdin)[0];print(d['id']);print(f\\\"{{d.get('club','')}}|{{d.get('title','')}}|{{d.get('date','')}}|{{d.get('start_time','')}}\\\")\""
+        f" | python3 -c \"import sys,json;print(json.load(sys.stdin)[0]['id'])\""
         f" > {tmp_file}"
     )
     login_line = "%02d %02d * * %d %s %s" % (
         cron["login_minute"], cron["login_hour"], cron["login_dow"], find_cmd, marker,
     )
-    book_line = "%02d %02d * * %d %s --dangerously-approve-token book --notify sf \"$(head -1 %s)\" --info \"$(tail -1 %s)\" --retry %d --retry-interval %d %s" % (
+    book_line = "%02d %02d * * %d %s --dangerously-approve-token book --notify sf \"$(cat %s)\" --retry %d --retry-interval %d %s" % (
         cron["book_minute"], cron["book_hour"], cron["book_dow"], va_bin,
-        tmp_file, tmp_file, max_retries, retry_interval, marker,
+        tmp_file, max_retries, retry_interval, marker,
     )
     comment = "# %s — %s — %s %s %s" % (club, course or "any class", DOW_NAMES[day_of_week], time_str, marker)
     return [comment, login_line, book_line]
@@ -111,11 +113,45 @@ def build_cron_entry(
 # ── Worker: book with retry ───────────────────────────────────────
 
 
-def _fmt_class_info(token: str, info: str | None) -> str:
-    """Format human-readable class description from ``info``.
+def _class_info_from_cache(token: str, state_dir: Path) -> dict[str, Any] | None:
+    """Look up class info from the class cache (populated by ``list_classes``)."""
+    path = state_dir / "class_cache.json"
+    if not path.exists():
+        return None
+    with path.open("r") as f:
+        cache = json.load(f)
+    return cache.get(token)
+
+
+def _format_class_from_cache(token: str, cached: dict[str, Any]) -> str:
+    """Build a human-readable description from a cached ``CalendarClass`` dict."""
+    parts: list[str] = []
+    if cached.get("title"):
+        parts.append(f"**{cached['title']}**")
+    if cached.get("club"):
+        parts.append(f"at {cached['club']}")
+    date = cached.get("date")
+    if date:
+        day = datetime.strptime(date, "%Y-%m-%d").strftime("%A")
+        parts.append(f"on {day}")
+    if cached.get("start_time"):
+        parts.append(f"({cached['start_time']})")
+    if cached.get("trainer"):
+        parts.append(f"with {cached['trainer']}")
+    if cached.get("room"):
+        parts.append(f"in {cached['room']}")
+    if parts:
+        return " ".join(parts)
+    return f"token **{token}**"
+
+
+def _fmt_class_info(token: str, info: str | None, *, state_dir: Path | None = None) -> str:
+    """Format human-readable class description from ``info`` or the class cache.
 
     Accepts ``Club|Title|Date|Time`` (4 parts) or the legacy 3-part
-    ``Club|Title|Time``.  Falls back to the raw token when no info.
+    ``Club|Title|Time``.  When no ``info`` is given, falls back to the
+    class cache (populated by ``list_classes``).  If that also fails,
+    shows the raw token.
     """
     if info:
         parts = info.split("|")
@@ -127,6 +163,12 @@ def _fmt_class_info(token: str, info: str | None) -> str:
         if len(parts) == 3:
             club, title, time_str = parts
             return f"**{title}** at {club} ({time_str})"
+
+    if state_dir is not None:
+        cached = _class_info_from_cache(token, state_dir)
+        if cached is not None:
+            return _format_class_from_cache(token, cached)
+
     return f"token **{token}**"
 
 
@@ -149,7 +191,7 @@ def worker_book(
     logger = logging.getLogger("va-automate")
     notifier = from_config(None) if notify else NullNotifier()
 
-    class_desc = _fmt_class_info(token, info)
+    class_desc = _fmt_class_info(token, info, state_dir=client.config.state_dir)
     last_error: str | None = None
 
     for attempt in range(1, max_retries + 1):

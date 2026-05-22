@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import unittest
+from pathlib import Path
 from contextlib import redirect_stdout
 from unittest.mock import MagicMock, patch
 
@@ -207,6 +208,7 @@ class CliTests(unittest.TestCase):
     def test_va_error_exits_with_code_2(self, client_cls, store_cls) -> None:
         store_cls.return_value.load.return_value = None
         instance = client_cls.return_value.__enter__.return_value
+        instance.config.state_dir = Path("/tmp")
         instance.book.side_effect = VAError("broken")
         with self.assertRaises(SystemExit) as exc:
             cli.main(["--dangerously-approve-token", "book", "208239c232"])
@@ -335,6 +337,7 @@ class CliTests(unittest.TestCase):
     def test_book_notify_sf_on_success_sends_success(self, client_cls, store_cls) -> None:
         store_cls.return_value.load.return_value = None
         instance = client_cls.return_value.__enter__.return_value
+        instance.config.state_dir = Path("/tmp")
         instance.book.return_value = {"StatusCode": 200}
         mock_notifier = MagicMock()
         with patch("va_cli.cli._build_notifier", return_value=mock_notifier):
