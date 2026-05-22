@@ -101,13 +101,23 @@ class CronEntryTests(unittest.TestCase):
 
 class FmtClassInfoTests(unittest.TestCase):
 
-    def test_info_with_all_parts(self) -> None:
-        result = _fmt_class_info("100c220", "Roma EUR|Yoga Calm|18:00")
-        self.assertEqual(result, "**Yoga Calm** at Roma EUR (18:00)")
-
-    def test_info_none_falls_back_to_token(self) -> None:
-        result = _fmt_class_info("100c220", None)
+    def test_cache_miss_falls_back_to_token(self) -> None:
+        result = _fmt_class_info("100c220", state_dir=Path("/tmp"))
         self.assertEqual(result, "token **100c220**")
+
+    def test_cache_hit_returns_formatted(self) -> None:
+        path = Path("/tmp/class_cache.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            '{"100c220": {"token": "100c220", "title": "Yoga", "club": "Roma EUR",'
+            ' "date": "2026-03-16", "start_time": "18:00", "trainer": "Marco", "room": "Sala 1"}}'
+        )
+        result = _fmt_class_info("100c220", state_dir=Path("/tmp"))
+        self.assertEqual(
+            result,
+            "**Yoga** at Roma EUR on Monday (18:00) with Marco in Sala 1",
+        )
+        path.unlink(missing_ok=True)
 
 
 # =====================================================================

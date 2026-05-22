@@ -145,30 +145,14 @@ def _format_class_from_cache(token: str, cached: dict[str, Any]) -> str:
     return f"token **{token}**"
 
 
-def _fmt_class_info(token: str, info: str | None, *, state_dir: Path | None = None) -> str:
-    """Format human-readable class description from ``info`` or the class cache.
+def _fmt_class_info(token: str, state_dir: Path) -> str:
+    """Format human-readable class description from the class cache.
 
-    Accepts ``Club|Title|Date|Time`` (4 parts) or the legacy 3-part
-    ``Club|Title|Time``.  When no ``info`` is given, falls back to the
-    class cache (populated by ``list_classes``).  If that also fails,
-    shows the raw token.
+    Falls back to the raw token when the class is not in the cache.
     """
-    if info:
-        parts = info.split("|")
-        if len(parts) == 4:
-            club, title, date, time_str = parts
-            day = datetime.strptime(date, "%Y-%m-%d").strftime("%A") if date else ""
-            day_part = f" on {day}" if day else ""
-            return f"**{title}** at {club}{day_part} ({time_str})"
-        if len(parts) == 3:
-            club, title, time_str = parts
-            return f"**{title}** at {club} ({time_str})"
-
-    if state_dir is not None:
-        cached = _class_info_from_cache(token, state_dir)
-        if cached is not None:
-            return _format_class_from_cache(token, cached)
-
+    cached = _class_info_from_cache(token, state_dir)
+    if cached is not None:
+        return _format_class_from_cache(token, cached)
     return f"token **{token}**"
 
 
@@ -180,7 +164,6 @@ def worker_book(
     max_retries: int = 10,
     retry_interval: int = 5,
     notify: str | None = None,
-    info: str | None = None,
 ) -> dict[str, Any]:
     """Book a class with retry loop and optional Telegram notification.
 
@@ -191,7 +174,7 @@ def worker_book(
     logger = logging.getLogger("va-automate")
     notifier = from_config(None) if notify else NullNotifier()
 
-    class_desc = _fmt_class_info(token, info, state_dir=client.config.state_dir)
+    class_desc = _fmt_class_info(token, state_dir=client.config.state_dir)
     last_error: str | None = None
 
     for attempt in range(1, max_retries + 1):
