@@ -11,7 +11,8 @@ from typing import Any
 import questionary
 
 from .client import VAError, VirginActiveClient, ApprovalCallback
-from .notifier import NullNotifier, from_config
+from .notifier import NullNotifier, cancel_keyboard, from_config, TelegramNotifier
+from .store import BookingRecord, BookingStore, generate_id
 
 # ── Day name helpers ─────────────────────────────────────────────
 
@@ -150,10 +151,28 @@ def worker_book(
             if status_code == 200 or (isinstance(status_code, str) and status_code == "200"):
                 logger.info("SUCCESS on attempt %d", attempt)
                 if notify and "s" in notify:
-                    notifier.send(
-                        "success",
-                        f"Booking confirmed for {class_desc} (attempt {attempt})",
-                    )
+                    if isinstance(notifier, TelegramNotifier):
+                        store = BookingStore(client.config.state_dir / "bookings.json")
+                        record = BookingRecord(
+                            id=generate_id(),
+                            token=token,
+                            class_desc=class_desc,
+                            chat_id=int(notifier.chat_id),
+                        )
+                        store.save(record)
+                        msg_id = notifier.send(
+                            "success",
+                            f"Booking confirmed for {class_desc} (attempt {attempt})",
+                            reply_markup=cancel_keyboard(record.id),
+                        )
+                        if msg_id is not None:
+                            record.message_id = msg_id
+                            store.save(record)
+                    else:
+                        notifier.send(
+                            "success",
+                            f"Booking confirmed for {class_desc} (attempt {attempt})",
+                        )
                 return {"status": "success", "token": token, "attempts": attempt}
             else:
                 last_error = f"status {status_code}"

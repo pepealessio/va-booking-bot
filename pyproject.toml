@@ -17,6 +17,7 @@ dependencies = [
   "httpx>=0.28,<0.29",
   "keyring>=25.0,<26.0",
   "python-dotenv>=1.0,<2.0",
+  "python-telegram-bot>=22,<23",
   "questionary>=2.0,<3.0",
 ]
 

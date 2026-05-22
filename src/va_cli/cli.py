@@ -11,11 +11,12 @@ from typing import Any
 import httpx
 
 from .automate import cmd_add, cmd_list, cmd_remove, worker_book, _fmt_class_info
-from .notifier import NullNotifier, from_config, TelegramNotifier
+from .notifier import NullNotifier, cancel_keyboard, from_config, TelegramNotifier
 from .client import VAError, VirginActiveClient
 from .config import Config
 from .credentials import CredentialStore
 from .models import CalendarClass
+from .store import BookingRecord, BookingStore, generate_id
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,6 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     cancel = subparsers.add_parser("cancel", help="Cancel a booked class.")
     cancel.add_argument("token", help="Booking token in '<bookingId>c<center>' format.")
+
+    subparsers.add_parser("run-bot", help="Start the Telegram bot (long-polling) to handle cancel requests.")
 
     subparsers.add_parser("logout", help="Clear saved session and stored credentials.")
 
@@ -218,8 +221,30 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
                 notifier.send("error", f"Booking failed for {class_desc}")
             raise
         if "s" in (notify or ""):
-            notifier.send("success", f"Booking confirmed for {class_desc}")
+            if isinstance(notifier, TelegramNotifier):
+                store = BookingStore(client.config.state_dir / "bookings.json")
+                record = BookingRecord(
+                    id=generate_id(),
+                    token=args.token,
+                    class_desc=class_desc,
+                    chat_id=int(notifier.chat_id),
+                )
+                store.save(record)
+                msg_id = notifier.send(
+                    "success",
+                    f"Booking confirmed for {class_desc}",
+                    reply_markup=cancel_keyboard(record.id),
+                )
+                if msg_id is not None:
+                    record.message_id = msg_id
+                    store.save(record)
+            else:
+                notifier.send("success", f"Booking confirmed for {class_desc}")
         return result
+    if args.command == "run-bot":
+        from .bot import run_bot as _run_bot
+        _run_bot()
+        return {"status": "running"}
     if args.command == "cancel":
         return client.cancel(args.token, approve=approve)
     if args.command == "logout":

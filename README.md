@@ -104,6 +104,8 @@ va book 355132c220 --notify f     # notify on failure only
 va book 355132c220 --notify sf    # notify on both success and failure
 ```
 
+When Telegram is configured, a successful booking notification includes an **❌ Cancel booking** inline button. Tapping it cancels the booking and updates the message to confirm. Requires the bot process to be running — see [`va run-bot`](#va-run-bot).
+
 ### `va automate add`
 
 Generate cron lines for recurring booking. Two modes:
@@ -168,6 +170,42 @@ crontab -l | va automate remove | crontab -            # interactive
 
 stdin must be piped from `crontab -l` **and** stdout must be piped to `crontab -`. The command refuses to run if either end is a terminal — this prevents accidentally printing or discarding crontab data.
 
+### `va run-bot`
+
+Starts a long-polling Telegram bot process that listens for callback queries from the cancel button on booking success messages.
+
+```bash
+va run-bot
+```
+
+Requires `VA_NOTIFY_TOKEN` to be set. The bot uses long-polling (async I/O) — it holds an open HTTPS connection to Telegram and responds only when a button is tapped. CPU usage is near zero while idle.
+
+**How the cancel flow works:**
+
+1. A successful booking sends a Telegram message with an inline **❌ Cancel booking** button
+2. The booking token and class info are saved to `.va_state/bookings.json`
+3. When you tap the button, the bot receives the callback, loads the saved token, and calls the VA cancel API
+4. The message is updated to `❌ Booking cancelled for ...` and the button is removed
+5. If cancel fails, the message shows the error and keeps the button
+
+**Running as a service:**
+
+```ini
+[Unit]
+Description=VA Book Bot
+After=network.target
+
+[Service]
+ExecStart=/path/to/venv/bin/va run-bot
+Restart=always
+User=alessiopepe
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The bot needs `VA_USERNAME` and `VA_PASSWORD` in the environment in case the Virgin Active session expires and needs re-authentication.
+
 ### Telegram Notifications
 
 Set `VA_NOTIFY_TOKEN` and `VA_NOTIFY_CHAT_ID` to enable push notifications. See the full guide at [`docs/telegram-setup.md`](docs/telegram-setup.md).
@@ -186,7 +224,9 @@ va classes --notify f --club "Roma EUR"  # Telegram on class fetch failure
 va book TOKEN --notify sf               # Telegram on booking success or failure
 ```
 
-Generated cron entries already include `--notify f` on the login/class-fetch steps and `--notify sf` on the booking step, so all automated runs send Telegram alerts.
+When you opt into success notifications (`--notify s` or `--notify sf`), the message includes an **❌ Cancel booking** inline button. Start the bot with `va run-bot` to handle cancel button taps.
+
+Generated cron entries already include `--notify f` on the login/class-fetch steps and `--notify sf` on the booking step, so all automated runs send Telegram alerts and include the cancel button.
 
 All cron booking attempts are logged to `.va_state/automate.log`.
 
