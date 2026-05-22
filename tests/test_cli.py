@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import io
 import unittest
+from pathlib import Path
 from contextlib import redirect_stdout
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from va_cli import cli
 from va_cli.client import VAError
@@ -207,6 +208,7 @@ class CliTests(unittest.TestCase):
     def test_va_error_exits_with_code_2(self, client_cls, store_cls) -> None:
         store_cls.return_value.load.return_value = None
         instance = client_cls.return_value.__enter__.return_value
+        instance.config.state_dir = Path("/tmp")
         instance.book.side_effect = VAError("broken")
         with self.assertRaises(SystemExit) as exc:
             cli.main(["--dangerously-approve-token", "book", "208239c232"])
@@ -303,6 +305,45 @@ class CliTests(unittest.TestCase):
         result = cli._json_ready({"Data": [{"NestedKey": 1, "Skip": None}]})
         self.assertEqual(result["data"][0]["nested_key"], 1)
         self.assertNotIn("skip", result["data"][0])
+
+    @patch("va_cli.cli.CredentialStore")
+    @patch("va_cli.cli.VirginActiveClient")
+    def test_login_notify_f_on_failure_sends_error(self, client_cls, store_cls) -> None:
+        store_cls.return_value.load.return_value = None
+        instance = client_cls.return_value.__enter__.return_value
+        instance.login.side_effect = VAError("bad credentials")
+        mock_notifier = MagicMock()
+        with patch("va_cli.cli._build_notifier", return_value=mock_notifier):
+            with self.assertRaises(SystemExit):
+                cli.main(["login", "--user", "x", "--passwd", "y", "--notify", "f"])
+        mock_notifier.send.assert_called_once_with("error", "Login failed: bad credentials")
+
+    @patch("va_cli.cli.CredentialStore")
+    @patch("va_cli.cli.VirginActiveClient")
+    def test_classes_notify_f_on_failure_sends_error(self, client_cls, store_cls) -> None:
+        store_cls.return_value.load.return_value = None
+        instance = client_cls.return_value.__enter__.return_value
+        instance.has_saved_session.return_value = True
+        instance.list_classes.side_effect = VAError("no classes")
+        mock_notifier = MagicMock()
+        with patch("va_cli.cli._build_notifier", return_value=mock_notifier):
+            with self.assertRaises(SystemExit):
+                cli.main(["--dangerously-approve-token", "classes", "--notify", "f", "--date", "2026-03-13"])
+        mock_notifier.send.assert_called_once()
+        self.assertIn("Failed to list classes", mock_notifier.send.call_args[0][1])
+
+    @patch("va_cli.cli.CredentialStore")
+    @patch("va_cli.cli.VirginActiveClient")
+    def test_book_notify_sf_on_success_sends_success(self, client_cls, store_cls) -> None:
+        store_cls.return_value.load.return_value = None
+        instance = client_cls.return_value.__enter__.return_value
+        instance.config.state_dir = Path("/tmp")
+        instance.book.return_value = {"StatusCode": 200}
+        mock_notifier = MagicMock()
+        with patch("va_cli.cli._build_notifier", return_value=mock_notifier):
+            exit_code = cli.main(["--dangerously-approve-token", "book", "208239c232", "--notify", "sf"])
+        self.assertEqual(exit_code, 0)
+        mock_notifier.send.assert_called_once_with("success", "Booking confirmed for token **208239c232**")
 
     @patch("va_cli.cli.CredentialStore")
     @patch("va_cli.cli.VirginActiveClient")

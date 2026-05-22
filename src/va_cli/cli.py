@@ -10,11 +10,13 @@ from typing import Any
 
 import httpx
 
-from .automate import cmd_add, cmd_list, cmd_remove, worker_book
+from .automate import cmd_add, cmd_list, cmd_remove, worker_book, _fmt_class_info
+from .notifier import NullNotifier, cancel_keyboard, from_config, TelegramNotifier
 from .client import VAError, VirginActiveClient
 from .config import Config
 from .credentials import CredentialStore
 from .models import CalendarClass
+from .store import BookingRecord, BookingStore, generate_id
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     login.add_argument("--user")
     login.add_argument("--passwd")
     login.add_argument("--save", action="store_true")
+    login.add_argument("--notify", choices=["s", "f", "sf"], help="Notify on success (s), fail (f), or both (sf).")
 
     classes = subparsers.add_parser("classes", help="List classes.")
     _add_filter_args(classes)
@@ -41,14 +44,18 @@ def build_parser() -> argparse.ArgumentParser:
     classes.add_argument("--from-time")
     classes.add_argument("--to-time")
     classes.add_argument("--day", type=int, help="Day of week: 0=Mon … 6=Sun (computes next date)")
+    classes.add_argument("--notify", choices=["s", "f", "sf"], help="Notify on success (s), fail (f), or both (sf).")
 
     book = subparsers.add_parser("book", help="Book a class.")
     book.add_argument("token", nargs="?", default=None, help="Class token in '<bookingId>c<center>' format.")
     book.add_argument("--retry", type=int, default=1, help="Max retry attempts (default 1, no retry)")
     book.add_argument("--retry-interval", type=int, default=5, help="Seconds between retries (default 5)")
+    book.add_argument("--notify", choices=["s", "f", "sf"], help="Notify on success (s), fail (f), or both (sf).")
 
     cancel = subparsers.add_parser("cancel", help="Cancel a booked class.")
     cancel.add_argument("token", help="Booking token in '<bookingId>c<center>' format.")
+
+    subparsers.add_parser("run-bot", help="Start the Telegram bot (long-polling) to handle cancel requests.")
 
     subparsers.add_parser("logout", help="Clear saved session and stored credentials.")
 
@@ -119,11 +126,33 @@ def _run_main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _build_notifier(notify_flag: str | None) -> NullNotifier | TelegramNotifier:
+    """Build notifier from flag value. Warns if --notify is set but unconfigured."""
+    if notify_flag is None:
+        return NullNotifier()
+    n = from_config(None)
+    if isinstance(n, NullNotifier):
+        print(
+            "warning: --notify requires VA_NOTIFY_TOKEN and VA_NOTIFY_CHAT_ID env vars",
+            file=sys.stderr,
+        )
+    return n
+
+
 def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_store: CredentialStore) -> Any:
     approve = _approval_callback(args)
 
     if args.command == "login":
-        client.login()
+        notify = getattr(args, "notify", None)
+        notifier = _build_notifier(notify)
+        try:
+            client.login()
+        except (VAError, httpx.HTTPError) as exc:
+            if "f" in (notify or ""):
+                notifier.send("error", f"Login failed: {exc}")
+            raise
+        if "s" in (notify or ""):
+            notifier.send("success", "Login successful")
         if args.save or getattr(args, "credential_source", None) == "prompt":
             if not args.save:
                 answer = input("Save credentials to system keyring? [y/N]: ")
@@ -132,6 +161,8 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             credential_store.save(client.config.username or "", client.config.password or "")
         return {"status": "success"}
     if args.command == "classes":
+        notify = getattr(args, "notify", None)
+        notifier = _build_notifier(notify)
         use_auth = client.has_saved_session() and not args.no_auth
         date = getattr(args, "date", None)
         if date is None and getattr(args, "day", None) is not None:
@@ -143,7 +174,14 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             "date": date,
             "target": getattr(args, "target", None),
         }
-        classes = client.list_classes(flt, use_auth=use_auth, approve=approve if use_auth else None)
+        try:
+            classes = client.list_classes(flt, use_auth=use_auth, approve=approve if use_auth else None)
+        except (VAError, httpx.HTTPError) as exc:
+            if "f" in (notify or ""):
+                notifier.send("error", f"Failed to list classes: {exc}")
+            raise
+        if "s" in (notify or ""):
+            notifier.send("success", f"Successfully listed {len(classes)} classes")
         result = []
         for item in _filter_classes_by_time(classes, args):
             out: dict[str, Any] = {
@@ -158,6 +196,8 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
             result.append({k: v for k, v in out.items() if v is not None})
         return result
     if args.command == "book":
+        notify = getattr(args, "notify", None)
+        notifier = _build_notifier(notify)
         if not args.token:
             raise VAError("book requires a token")
         max_retries = getattr(args, "retry", 1)
@@ -168,8 +208,40 @@ def dispatch(args: argparse.Namespace, client: VirginActiveClient, credential_st
                 approve=approve,
                 max_retries=max_retries,
                 retry_interval=getattr(args, "retry_interval", 5),
+                notify=notify,
             )
-        return client.book(args.token, approve=approve)
+        class_desc = _fmt_class_info(args.token, state_dir=client.config.state_dir)
+        try:
+            result = client.book(args.token, approve=approve)
+        except (VAError, httpx.HTTPError) as exc:
+            if "f" in (notify or ""):
+                notifier.send("error", f"Booking failed for {class_desc}")
+            raise
+        if "s" in (notify or ""):
+            if isinstance(notifier, TelegramNotifier):
+                store = BookingStore(client.config.state_dir / "bookings.json")
+                record = BookingRecord(
+                    id=generate_id(),
+                    token=args.token,
+                    class_desc=class_desc,
+                    chat_id=int(notifier.chat_id),
+                )
+                store.save(record)
+                msg_id = notifier.send(
+                    "success",
+                    f"Booking confirmed for {class_desc}",
+                    reply_markup=cancel_keyboard(record.id),
+                )
+                if msg_id is not None:
+                    record.message_id = msg_id
+                    store.save(record)
+            else:
+                notifier.send("success", f"Booking confirmed for {class_desc}")
+        return result
+    if args.command == "run-bot":
+        from .bot import run_bot as _run_bot
+        _run_bot()
+        return {"status": "running"}
     if args.command == "cancel":
         return client.cancel(args.token, approve=approve)
     if args.command == "logout":

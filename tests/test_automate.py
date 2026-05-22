@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import unittest
+from pathlib import Path
 from contextlib import redirect_stdout
 from unittest.mock import patch, MagicMock
 
@@ -10,6 +11,7 @@ from va_cli.automate import (
     VA_MARKER_PREFIX,
     _cronline_to_dict,
     _do_remove,
+    _fmt_class_info,
     build_cron_entry,
     cmd_list,
     compute_cron_times,
@@ -52,11 +54,12 @@ class CronComputationTests(unittest.TestCase):
         lines = build_cron_entry("Roma EUR", 0, "18:00", course="Yoga")
         self.assertEqual(len(lines), 3)
         self.assertTrue(lines[0].startswith("#"))
-        self.assertIn("va login &&", lines[1])
+        self.assertIn("va login --notify f &&", lines[1])
         self.assertIn("--dangerously-approve-token --json classes", lines[1])
         self.assertIn("--club 'Roma EUR'", lines[1])
         self.assertIn("--course 'Yoga'", lines[1])
-        self.assertIn("$(cat /tmp/va_booking_", lines[2])
+        self.assertIn('"$(cat /tmp/va_booking_', lines[2])
+        self.assertNotIn('--info', lines[2])
 
 
 # =====================================================================
@@ -84,16 +87,53 @@ class CronEntryTests(unittest.TestCase):
         self.assertIn("Friday", lines[0])
         self.assertIn("12:00", lines[0])
 
+    def test_cron_entry_includes_notify_flags(self) -> None:
+        lines = build_cron_entry("Roma EUR", 0, "18:00", course="Yoga")
+        self.assertIn("login --notify f", lines[1])
+        self.assertIn("--json classes --notify f", lines[1])
+        self.assertIn("book --notify sf", lines[2])
+
 
 # =====================================================================
-# 3. Worker book with retry (3 tests)
+# 3. Class info formatting (2 tests)
+# =====================================================================
+
+
+class FmtClassInfoTests(unittest.TestCase):
+
+    def test_cache_miss_falls_back_to_token(self) -> None:
+        result = _fmt_class_info("100c220", state_dir=Path("/tmp"))
+        self.assertEqual(result, "token **100c220**")
+
+    def test_cache_hit_returns_formatted(self) -> None:
+        path = Path("/tmp/class_cache.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            '{"100c220": {"token": "100c220", "title": "Yoga", "club": "Roma EUR",'
+            ' "date": "2026-03-16", "start_time": "18:00", "trainer": "Marco", "room": "Sala 1"}}'
+        )
+        result = _fmt_class_info("100c220", state_dir=Path("/tmp"))
+        self.assertEqual(
+            result,
+            "**Yoga** at Roma EUR on Monday (18:00) with Marco in Sala 1",
+        )
+        path.unlink(missing_ok=True)
+
+
+# =====================================================================
+# 4. Worker book with retry (5 tests)
 # =====================================================================
 
 
 class WorkerBookTests(unittest.TestCase):
 
+    def _mock_client(self) -> MagicMock:
+        client = MagicMock()
+        client.config.state_dir = Path("/tmp")
+        return client
+
     def test_success_first_attempt(self) -> None:
-        mock_client = MagicMock()
+        mock_client = self._mock_client()
         mock_client.book.return_value = {"StatusCode": 200, "StatusMessage": "ok"}
 
         with patch("va_cli.automate.time.sleep"):
@@ -106,7 +146,7 @@ class WorkerBookTests(unittest.TestCase):
         self.assertEqual(result["attempts"], 1)
 
     def test_retry_on_error_then_succeeds(self) -> None:
-        mock_client = MagicMock()
+        mock_client = self._mock_client()
         mock_client.book.side_effect = [VAError("temporarily unavailable"), {"StatusCode": 200}]
 
         with patch("va_cli.automate.time.sleep"):
@@ -119,7 +159,7 @@ class WorkerBookTests(unittest.TestCase):
         self.assertEqual(result["attempts"], 2)
 
     def test_exhausts_retries_raises(self) -> None:
-        mock_client = MagicMock()
+        mock_client = self._mock_client()
         mock_client.book.side_effect = VAError("server error")
 
         with patch("va_cli.automate.time.sleep"):
@@ -130,9 +170,41 @@ class WorkerBookTests(unittest.TestCase):
                     max_retries=2, retry_interval=1,
                 )
 
+    def test_notify_f_skips_success_send(self) -> None:
+        mock_client = self._mock_client()
+        mock_client.book.return_value = {"StatusCode": 200}
+        mock_notifier = MagicMock()
+
+        with patch("va_cli.automate.time.sleep"):
+            with patch("va_cli.automate.from_config", return_value=mock_notifier):
+                result = worker_book(
+                    client=mock_client, token="100c220",
+                    approve=lambda _: True,
+                    max_retries=1, retry_interval=1,
+                    notify="f",
+                )
+        self.assertEqual(result["status"], "success")
+        mock_notifier.send.assert_not_called()
+
+    def test_notify_f_sends_error_on_failure(self) -> None:
+        mock_client = self._mock_client()
+        mock_client.book.side_effect = VAError("server error")
+        mock_notifier = MagicMock()
+
+        with patch("va_cli.automate.time.sleep"):
+            with patch("va_cli.automate.from_config", return_value=mock_notifier):
+                with self.assertRaises(VAError):
+                    worker_book(
+                        client=mock_client, token="100c220",
+                        approve=lambda _: True,
+                        max_retries=2, retry_interval=1,
+                        notify="f",
+                    )
+        mock_notifier.send.assert_called_once_with("error", "Booking failed for token **100c220** after 2 attempts — server error")
+
 
 # =====================================================================
-# 4. CLI integration (3 tests)
+# 5. CLI integration (3 tests)
 # =====================================================================
 
 
@@ -217,7 +289,7 @@ class CliBookTests(unittest.TestCase):
         self.assertEqual(kwargs["retry_interval"], 30)
 
 # =====================================================================
-# 5. Crontab entry ID marker (3 tests)
+# 6. Crontab entry ID marker (3 tests)
 # =====================================================================
 
 
@@ -240,7 +312,7 @@ class CronEntryMarkerTests(unittest.TestCase):
 
 
 # =====================================================================
-# 6. Cronline parser (3 tests)
+# 7. Cronline parser (3 tests)
 # =====================================================================
 
 
@@ -275,7 +347,7 @@ class CronlineParserTests(unittest.TestCase):
 
 
 # =====================================================================
-# 7. List command (2 tests)
+# 8. List command (2 tests)
 # =====================================================================
 
 
@@ -302,7 +374,7 @@ class CmdListTests(unittest.TestCase):
 
 
 # =====================================================================
-# 8. Remove command (3 tests)
+# 9. Remove command (3 tests)
 # =====================================================================
 
 

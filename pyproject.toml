@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "va-book-bot"
-version = "0.3.1"
+version = "0.4.0"
 description = "CLI tooling for Virgin Active Italy class discovery and booking workflows."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,6 +17,7 @@ dependencies = [
   "httpx>=0.28,<0.29",
   "keyring>=25.0,<26.0",
   "python-dotenv>=1.0,<2.0",
+  "python-telegram-bot>=22,<23",
   "questionary>=2.0,<3.0",
 ]
 

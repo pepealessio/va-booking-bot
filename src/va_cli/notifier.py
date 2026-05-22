@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 import httpx
 
 
+def cancel_keyboard(booking_id: str) -> dict[str, Any]:
+    return {
+        "inline_keyboard": [[{
+            "text": "❌ Cancel booking",
+            "callback_data": f"cancel:{booking_id}",
+        }]],
+    }
+
+
 class NullNotifier:
     """No-op notifier when nothing is configured."""
 
-    def send(self, level: str, message: str) -> None:
-        pass
+    def send(self, level: str, message: str, *, reply_markup: dict | None = None) -> int | None:
+        return None
 
 
 class TelegramNotifier:
@@ -27,21 +37,21 @@ class TelegramNotifier:
         self.chat_id = chat_id
         self._url = f"https://api.telegram.org/bot{token}/sendMessage"
 
-    def send(self, level: str, message: str) -> None:
+    def send(self, level: str, message: str, *, reply_markup: dict | None = None) -> int | None:
         prefix = self.PREFIXES.get(level, "")
         text = f"{prefix} {message}" if prefix else message
+        data: dict[str, Any] = {
+            "chat_id": self.chat_id,
+            "text": text,
+            "parse_mode": "Markdown",
+        }
+        if reply_markup:
+            data["reply_markup"] = json.dumps(reply_markup)
         try:
-            httpx.post(
-                self._url,
-                data={
-                    "chat_id": self.chat_id,
-                    "text": text,
-                    "parse_mode": "Markdown",
-                },
-                timeout=10,
-            )
+            resp = httpx.post(self._url, data=data, timeout=10)
+            return resp.json().get("result", {}).get("message_id")
         except Exception:
-            pass
+            return None
 
 
 def from_config(notify_cfg: dict[str, Any] | None) -> NullNotifier | TelegramNotifier:
