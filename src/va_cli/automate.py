@@ -94,7 +94,7 @@ def build_cron_entry(
         f"{va_bin} login --notify f && {va_bin} --dangerously-approve-token --json classes --notify f"
         f" --club '{club}'{course_part}"
         f" --day {day_of_week} --time '{time_str}'"
-        f" | python3 -c \"import sys,json;d=json.load(sys.stdin)[0];print(d['id']);print(f\\\"{{d.get('club','')}}|{{d.get('title','')}}|{{d.get('start_time','')}}\\\")\""
+        f" | python3 -c \"import sys,json;d=json.load(sys.stdin)[0];print(d['id']);print(f\\\"{{d.get('club','')}}|{{d.get('title','')}}|{{d.get('date','')}}|{{d.get('start_time','')}}\\\")\""
         f" > {tmp_file}"
     )
     login_line = "%02d %02d * * %d %s %s" % (
@@ -112,9 +112,18 @@ def build_cron_entry(
 
 
 def _fmt_class_info(token: str, info: str | None) -> str:
-    """Format human-readable class description from ``info`` (Club|Title|Time)."""
+    """Format human-readable class description from ``info``.
+
+    Accepts ``Club|Title|Date|Time`` (4 parts) or the legacy 3-part
+    ``Club|Title|Time``.  Falls back to the raw token when no info.
+    """
     if info:
-        parts = info.split("|", 2)
+        parts = info.split("|")
+        if len(parts) == 4:
+            club, title, date, time_str = parts
+            day = datetime.strptime(date, "%Y-%m-%d").strftime("%A") if date else ""
+            day_part = f" on {day}" if day else ""
+            return f"**{title}** at {club}{day_part} ({time_str})"
         if len(parts) == 3:
             club, title, time_str = parts
             return f"**{title}** at {club} ({time_str})"
